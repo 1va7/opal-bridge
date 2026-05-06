@@ -62,7 +62,7 @@ def render(
     fidelity: str = "A",
     subagent_strategy: str = "drop",
     model_name: str = "gpt-5.5",
-    model_provider: str = "openai",
+    model_provider: str | None = None,
     timezone_name: str = "Asia/Shanghai",
     session_id: str | None = None,
     title_prefix: str | None = None,  # ignored by codex render; here for CLI compat
@@ -100,8 +100,9 @@ def render(
         "originator": "agent-bridge",
         "cli_version": "0.1.0",
         "source": {"custom": "agent-bridge"},
-        "model_provider": model_provider,
     }
+    if model_provider:
+        session_meta_payload["model_provider"] = model_provider
     lines.append({"timestamp": started_iso, "type": "session_meta", "payload": session_meta_payload})
 
     # 2. turn_context (1ms after session_meta)

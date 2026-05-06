@@ -113,9 +113,11 @@ def render(
     parent: str | None = None
 
     if title_prefix:
-        # First user prompt summary as title body
-        first_user = next((m for m in session.moments if hasattr(m, "text") and m.kind == "user_text"), None)
-        body = (first_user.text[:60] if first_user else session.source_session_id)
+        # First user prompt summary as title body — but skip Codex/CC harness
+        # injection envelopes like <environment_context>, <permissions ...>,
+        # <skills_instructions>, etc., which always start a Codex session.
+        first_user = _first_real_user_text(session)
+        body = (first_user[:60] if first_user else session.source_session_id)
         lines.append({
             "type": "custom-title",
             "customTitle": f"{title_prefix}{body}".replace("\n", " "),
@@ -419,3 +421,31 @@ def _write_jsonl(path: Path, lines: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for ln in lines:
             f.write(json.dumps(ln, ensure_ascii=False) + "\n")
+
+
+# Codex injects these XML-shaped envelopes as the FIRST user/developer message
+# of every session. They're not real user prompts and make terrible titles.
+_ENVELOPE_PREFIXES = (
+    "<environment_context",
+    "<permissions",
+    "<collaboration_mode",
+    "<skills_instructions",
+    "<system-reminder",
+    "<task-notification",
+    "<local-command-stdout",
+)
+
+
+def _first_real_user_text(session) -> str | None:
+    """Return the first UserText.text that's not a harness envelope."""
+    for m in session.moments:
+        if getattr(m, "kind", None) != "user_text":
+            continue
+        text = getattr(m, "text", "") or ""
+        stripped = text.lstrip()
+        if not stripped:
+            continue
+        if any(stripped.startswith(p) for p in _ENVELOPE_PREFIXES):
+            continue
+        return text
+    return None

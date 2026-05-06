@@ -99,7 +99,13 @@ def render(
         "cwd": session.cwd,
         "originator": "agent-bridge",
         "cli_version": "0.1.0",
-        "source": {"custom": "agent-bridge"},
+        # Use "cli" source so codex's resume picker shows us. Codex 0.128's
+        # picker only includes sessions whose source ∈ INTERACTIVE_SESSION_SOURCES
+        # (Cli, VsCode, Custom("atlas"), Custom("chatgpt")) — even with
+        # --include-non-interactive. Custom("agent-bridge") is invisible.
+        # The originator field above remains "agent-bridge" so the session is
+        # still distinguishable from real CLI sessions on inspection.
+        "source": "cli",
     }
     if model_provider:
         session_meta_payload["model_provider"] = model_provider
@@ -166,6 +172,7 @@ def render(
             lines.extend(_render_subagent_transcript(sa_id, sub_moments, session, file_snapshots))
 
     _write_jsonl(out_path, lines)
+    _append_thread_name(home, uuid, _make_thread_name(session))
 
     resume_command = f'codex exec resume {uuid} "<your prompt>" -o /tmp/agent-bridge-resume.md'
 
@@ -389,6 +396,68 @@ def _write_jsonl(path: Path, lines: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for ln in lines:
             f.write(json.dumps(ln, ensure_ascii=False) + "\n")
+
+
+# Codex's harness wraps every session start with this synthetic envelope.
+# Skip it when picking a title body so users see real prompts.
+_CODEX_ENVELOPE_PREFIXES = (
+    "<environment_context",
+    "<permissions",
+    "<collaboration_mode",
+    "<skills_instructions",
+    "<system-reminder",
+    "<task-notification",
+    "<local-command-stdout",
+    "<local-command-caveat",
+    "<command-name",
+    "<command-message",
+    "<command-args",
+)
+
+
+def _first_real_user_text(session: Session) -> str | None:
+    """Return the first user_text moment that's not a harness envelope."""
+    from agent_bridge.canonical.schema import UserText
+    for m in session.moments:
+        if not isinstance(m, UserText):
+            continue
+        text = m.text or ""
+        stripped = text.lstrip()
+        if not stripped:
+            continue
+        if any(stripped.startswith(p) for p in _CODEX_ENVELOPE_PREFIXES):
+            continue
+        return text
+    return None
+
+
+def _make_thread_name(session: Session) -> str:
+    """Build a recognizable label for the resume picker's Conversation column."""
+    body = _first_real_user_text(session) or session.source_session_id
+    body = body.replace("\n", " ").replace("\r", " ").strip()
+    if len(body) > 60:
+        body = body[:57] + "..."
+    return f"[from {session.source_harness}] {body}"
+
+
+def _append_thread_name(codex_home: Path, thread_id: str, thread_name: str) -> None:
+    """Append a SessionIndexEntry to ~/.codex/session_index.jsonl so the
+    resume picker shows a recognizable label in the Conversation column.
+    Append-only — last entry wins per Codex's reverse-scan logic.
+    """
+    from datetime import datetime, timezone
+    idx_path = codex_home / "session_index.jsonl"
+    entry = {
+        "id": thread_id,
+        "thread_name": thread_name,
+        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
+    }
+    idx_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with idx_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as e:
+        logger.warning("failed to append %s: %s", idx_path, e)
 
 
 def _match_subagent_calls(session: Session) -> dict[str, str]:

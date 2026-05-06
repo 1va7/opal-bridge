@@ -376,7 +376,12 @@ def _extract_codex_id_from_filename(name: str) -> str | None:
 
 
 def _is_agent_bridge_codex(path: Path) -> bool:
-    """A Codex rollout produced by us has session_meta.payload.source.custom == 'agent-bridge'."""
+    """A Codex rollout produced by us has session_meta.payload.originator == 'agent-bridge'.
+
+    (The source field used to be Custom('agent-bridge'); v0.2 changed it to
+    "cli" so codex's resume picker shows us. We now identify ourselves via
+    `originator` instead — codex never uses that string itself.)
+    """
     try:
         with path.open(encoding="utf-8", errors="replace") as f:
             first = f.readline().strip()
@@ -390,7 +395,11 @@ def _is_agent_bridge_codex(path: Path) -> bool:
         return False
     if ev.get("type") != "session_meta":
         return False
-    src = (ev.get("payload") or {}).get("source")
+    payload = ev.get("payload") or {}
+    if payload.get("originator") == _AGENT_BRIDGE_MARKER:
+        return True
+    # Backward-compat: also detect old source.custom == "agent-bridge"
+    src = payload.get("source")
     if isinstance(src, dict) and src.get("custom") == _AGENT_BRIDGE_MARKER:
         return True
     return False

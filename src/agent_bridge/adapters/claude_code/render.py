@@ -433,6 +433,10 @@ _ENVELOPE_PREFIXES = (
     "<system-reminder",
     "<task-notification",
     "<local-command-stdout",
+    "<local-command-caveat",
+    "<command-name",
+    "<command-message",
+    "<command-args",
 )
 
 

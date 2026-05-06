@@ -46,10 +46,11 @@ def test_translate_fixture_structure(tmp_path: Path) -> None:
     ref_pls = [l.get("payload", {}).get("type") for l in ref_lines]
     assert out_pls == ref_pls
 
-    # First line must be session_meta with our originator
+    # First line must be session_meta with our originator (the source field
+    # is "cli" so codex's resume picker shows us; originator is the marker)
     assert out_lines[0]["type"] == "session_meta"
     assert out_lines[0]["payload"]["originator"] == "agent-bridge"
-    assert out_lines[0]["payload"]["source"] == {"custom": "agent-bridge"}
+    assert out_lines[0]["payload"]["source"] == "cli"
 
     # Second line must be turn_context referencing same cwd
     assert out_lines[1]["type"] == "turn_context"

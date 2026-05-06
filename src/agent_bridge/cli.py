@@ -24,7 +24,7 @@ def translate_cmd(
     model: str = typer.Option("gpt-5.5", "--model", help="Codex target model"),
     model_provider: str = typer.Option("openai", "--model-provider"),
     fidelity: str = typer.Option("A", "--fidelity", help="A=faithful (only one supported in MVP)"),
-    subagent_strategy: str = typer.Option("drop", "--subagent-strategy", help="MVP: drop only"),
+    subagent_strategy: str = typer.Option("drop", "--subagent-strategy", help="drop | inline (002c+)"),
 ) -> None:
     """Translate a session from one harness's format to another."""
     if fidelity != "A":

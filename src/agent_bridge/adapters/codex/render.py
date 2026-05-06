@@ -76,8 +76,12 @@ def render(
     warnings: list[str] = []
     if session.subagent_transcripts and subagent_strategy == "drop":
         warnings.append(
-            f"Dropped {len(session.subagent_transcripts)} subagent transcript(s); use spec 002 for split/inline."
+            f"Dropped {len(session.subagent_transcripts)} subagent transcript(s); "
+            f"use --subagent-strategy inline to splice them in."
         )
+    if session.subagent_transcripts and subagent_strategy not in {"drop", "inline"}:
+        warnings.append(f"Unknown subagent_strategy={subagent_strategy!r}; treating as 'drop'")
+        subagent_strategy = "drop"
 
     lines: list[dict[str, Any]] = []
     # 1. session_meta
@@ -114,12 +118,43 @@ def render(
     # Pre-pass: build per-call file state snapshots for apply_patch context.
     file_snapshots = build_file_state(session.moments)
 
+    # If inlining subagents, build a map from main_call_id → subagent_id by
+    # matching dispatch ToolCall.args.task against subagent_meta.description.
+    sub_inline_map: dict[str, str] = {}
+    if subagent_strategy == "inline" and session.subagent_transcripts:
+        sub_inline_map = _match_subagent_calls(session)
+        used = set(sub_inline_map.values())
+        for sa_id in session.subagent_transcripts:
+            if sa_id not in used:
+                warnings.append(
+                    f"Subagent {sa_id} could not be matched to any dispatch call; "
+                    "appending its transcript at the end of the main session."
+                )
+
     # 3+. response_items per moment
+    last_call_id_for_inline: str | None = None
     for moment in session.moments:
         if moment.agent_scope.startswith("subagent:") and subagent_strategy == "drop":
             continue
         rendered = _render_moment(moment, session, file_snapshots)
         lines.extend(rendered)
+        # If this is a tool_result for a subagent dispatch, splice in the sub transcript right after
+        if (
+            subagent_strategy == "inline"
+            and isinstance(moment, ToolResult)
+            and moment.call_id in sub_inline_map
+        ):
+            sa_id = sub_inline_map[moment.call_id]
+            sub_moments = session.subagent_transcripts.get(sa_id, [])
+            lines.extend(_render_subagent_transcript(sa_id, sub_moments, session, file_snapshots))
+
+    # Append unmatched subagent transcripts at the end
+    if subagent_strategy == "inline" and session.subagent_transcripts:
+        used = set(sub_inline_map.values())
+        for sa_id, sub_moments in session.subagent_transcripts.items():
+            if sa_id in used:
+                continue
+            lines.extend(_render_subagent_transcript(sa_id, sub_moments, session, file_snapshots))
 
     _write_jsonl(out_path, lines)
 
@@ -345,3 +380,96 @@ def _write_jsonl(path: Path, lines: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for ln in lines:
             f.write(json.dumps(ln, ensure_ascii=False) + "\n")
+
+
+def _match_subagent_calls(session: Session) -> dict[str, str]:
+    """Match main session's subagent_dispatch ToolCalls to subagent_transcripts.
+
+    Strategy: by description match against meta_dict, fallback chronological.
+    Returns dict: main_call_id → agent_id
+    """
+    meta = session.source_metadata.get("claude_code", {}).get("subagent_meta", {}) or {}
+    transcripts = session.subagent_transcripts or {}
+
+    # description → list[agent_id]
+    desc_to_ids: dict[str, list[str]] = {}
+    for sa_id, m in meta.items():
+        d = m.get("description") if isinstance(m, dict) else None
+        if d:
+            desc_to_ids.setdefault(d, []).append(sa_id)
+
+    used: set[str] = set()
+    result: dict[str, str] = {}
+
+    # First pass: exact description match
+    dispatches: list[ToolCall] = [
+        m for m in session.moments
+        if isinstance(m, ToolCall) and m.tool == "subagent_dispatch"
+    ]
+    dispatches.sort(key=lambda m: m.ts)
+
+    for d in dispatches:
+        wn = d.wire_native or {}
+        desc = wn.get("input", {}).get("description") or d.args.get("task_description")
+        if desc and desc in desc_to_ids:
+            for sa_id in desc_to_ids[desc]:
+                if sa_id not in used and sa_id in transcripts:
+                    result[d.call_id] = sa_id
+                    used.add(sa_id)
+                    break
+
+    # Second pass: leftover dispatches matched chronologically with leftover sub_ids
+    leftover_dispatches = [d for d in dispatches if d.call_id not in result]
+    leftover_subs = [
+        (sa_id, sub_moments[0].ts if sub_moments else "")
+        for sa_id, sub_moments in transcripts.items()
+        if sa_id not in used
+    ]
+    leftover_subs.sort(key=lambda t: t[1])
+
+    for d, (sa_id, _) in zip(leftover_dispatches, leftover_subs):
+        result[d.call_id] = sa_id
+        used.add(sa_id)
+
+    return result
+
+
+def _render_subagent_transcript(
+    sa_id: str,
+    sub_moments: list[Moment],
+    session: Session,
+    file_snapshots: dict[str, FileStateCache],
+) -> list[dict[str, Any]]:
+    """Render a sub transcript inline as developer-bracketed messages."""
+    if not sub_moments:
+        return []
+    out: list[dict[str, Any]] = []
+    boundary_ts_start = sub_moments[0].ts
+    boundary_ts_end = sub_moments[-1].ts
+    out.append({
+        "timestamp": boundary_ts_start,
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "developer",
+            "content": [{
+                "type": "input_text",
+                "text": f"--- begin subagent transcript ({sa_id}) ---",
+            }],
+        },
+    })
+    for m in sub_moments:
+        out.extend(_render_moment(m, session, file_snapshots))
+    out.append({
+        "timestamp": boundary_ts_end,
+        "type": "response_item",
+        "payload": {
+            "type": "message",
+            "role": "developer",
+            "content": [{
+                "type": "input_text",
+                "text": f"--- end subagent transcript ({sa_id}) ---",
+            }],
+        },
+    })
+    return out

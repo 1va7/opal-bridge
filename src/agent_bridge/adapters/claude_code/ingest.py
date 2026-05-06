@@ -55,8 +55,15 @@ DROPPED_SYSTEM_SUBTYPES = {
 
 
 def ingest(jsonl_path: Path | str, **opts: Any) -> Session:
-    """Read a CC session jsonl into a canonical Session."""
+    """Read a CC session jsonl into a canonical Session.
+
+    Args:
+      jsonl_path: path to the main session jsonl
+      follow_subagents: if True (default), also ingest <sess-id>/subagents/*.jsonl
+        siblings into session.subagent_transcripts.
+    """
     p = Path(jsonl_path)
+    follow_subagents = opts.get("follow_subagents", True)
     raw_lines = _read_jsonl(p)
     if not raw_lines:
         raise ValueError(f"Empty or unreadable CC session: {p}")
@@ -70,6 +77,11 @@ def ingest(jsonl_path: Path | str, **opts: Any) -> Session:
     # Sort by timestamp string (ISO 8601 sorts lexicographically)
     moments.sort(key=lambda m: m.ts)
     _post_infer_assistant_phase(moments)
+
+    subagent_transcripts: dict[str, list[Moment]] = {}
+    subagent_meta: dict[str, dict[str, Any]] = {}
+    if follow_subagents:
+        subagent_transcripts, subagent_meta = _ingest_subagents(p)
 
     return Session(
         id=uuid7_str(),
@@ -86,14 +98,54 @@ def ingest(jsonl_path: Path | str, **opts: Any) -> Session:
         started_at=header_info["started_at"],
         ended_at=header_info["ended_at"],
         moments=moments,
+        subagent_transcripts=subagent_transcripts,
         source_metadata={
             "claude_code": {
                 "version": header_info.get("version"),
                 "userType": header_info.get("user_type"),
                 "entrypoint": header_info.get("entrypoint"),
+                "subagent_meta": subagent_meta,
             }
         },
     )
+
+
+def _ingest_subagents(main_path: Path) -> tuple[dict[str, list[Moment]], dict[str, dict]]:
+    """Scan <main_path.stem>/subagents/agent-*.jsonl beside the session file.
+
+    Returns (transcripts, meta_dict) keyed by agentId.
+    """
+    sess_dir = main_path.parent / main_path.stem
+    sub_dir = sess_dir / "subagents"
+    transcripts: dict[str, list[Moment]] = {}
+    meta_dict: dict[str, dict] = {}
+    if not sub_dir.is_dir():
+        return transcripts, meta_dict
+
+    for jsonl in sub_dir.glob("agent-*.jsonl"):
+        agent_id = jsonl.stem.removeprefix("agent-")
+        meta_path = jsonl.with_suffix(".meta.json")
+        if meta_path.exists():
+            try:
+                meta_dict[agent_id] = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                meta_dict[agent_id] = {}
+
+        try:
+            sub_lines = _read_jsonl(jsonl)
+        except OSError:
+            continue
+        sub_moments: list[Moment] = []
+        for line in sub_lines:
+            for m in _translate_line(line, src_file=str(jsonl)):
+                # Force agent_scope tag
+                m.agent_scope = f"subagent:{agent_id}"
+                sub_moments.append(m)
+        sub_moments.sort(key=lambda m: m.ts)
+        _post_infer_assistant_phase(sub_moments)
+        transcripts[agent_id] = sub_moments
+
+    return transcripts, meta_dict
 
 
 def _read_jsonl(p: Path) -> list[dict[str, Any]]:

@@ -13,39 +13,48 @@
 - `ingest`: 该 agent 的 session jsonl → canonical
 - `render`: canonical → 该 agent 可被 `--resume` 加载的 session 文件
 
-## Quick start (MVP)
+## Quick start
 
 ```bash
 # 安装
 python3 -m venv .venv && .venv/bin/pip install -e .
 
-# 翻译一份 CC session 到 Codex
-.venv/bin/python -m agent_bridge.cli translate \
-    ~/.claude/projects/<encoded-cwd>/<UUIDv4>.jsonl
+# 列出最近的 CC session
+.venv/bin/python -m agent_bridge.cli list -n 10
 
-# 输出会落到 ~/.codex/sessions/YYYY/MM/DD/rollout-...jsonl
-# 终端最后一行给出 resume 命令，复制即可：
-#   codex exec resume <UUIDv7> "你的新指令"
+# 翻译一份 CC session 到 Codex（默认落到 ~/.codex/sessions/）
+.venv/bin/python -m agent_bridge.cli translate \
+    ~/.claude/projects/<encoded-cwd>/<UUIDv4>.jsonl \
+    --subagent-strategy inline    # 默认 drop；inline 把子 agent transcript 拼进主线
+
+# 一键 smoke：翻译 + 跑 codex exec resume + 自动清理
+.venv/bin/python -m agent_bridge.cli smoke \
+    ~/.claude/projects/<encoded-cwd>/<UUIDv4>.jsonl \
+    --prompt "Reply only with: WORKS"
+
+# 拿到结果后直接复制粘贴用：
+codex exec resume <UUIDv7> "你的新指令"
 ```
 
-## MVP 范围
+## 当前能力（截至 spec 002 完成）
 
-✅ 已实现：
-- CC → Codex 单向翻译
-- 6 个工具：Bash / Read / Glob / Grep / WebSearch / 大部分 metadata
-- attachment / skill_listing 与 nested_memory 转 developer message
-- thinking blocks 自动剥离
-- phase（commentary / final_answer）自动推断
-- 3 个 pytest 测试 + live `codex exec resume` 验证通过
+✅ CC → Codex 单向翻译：
+- 6 核心工具：Bash / Read / Glob / Grep / WebSearch / 大部分 metadata
+- **apply_patch 真翻译**：Edit / Write / MultiEdit / Delete / Move（含 ≤3 行 context）
+- **subagent inline**：自动扫 `<sess>/subagents/`，按 description 匹配后拼进主线
+- **compact_boundary**：优雅处理（不再崩），SummaryCompaction marker + isCompactSummary user
+- attachment / skill_listing / nested_memory / file → developer message
+- thinking blocks 自动剥离（signature 跨 harness 不兼容）
+- phase（commentary / final_answer）跨 CC line 推断
+- 15 个 pytest 测试 + live `codex exec resume` 验证通过
 
-❌ 推迟（见 `specs/001-translator-mvp.md` §1.2）：
-- Edit / Write / MultiEdit 完整 apply_patch 翻译（目前降级为 echo 占位）
-- subagent 翻译（`Agent` 工具）
-- compact_boundary 处理（遇到会抛 NotImplementedError）
-- Codex → CC 反向翻译
-- DAG 多 leaf
-- Mode B / C fidelity
-- LLM 摘要
+❌ 推迟（见 `specs/`）：
+- Codex → CC 反向翻译（spec 003）
+- DAG 多 leaf 选择
+- TaskCreate stateful diff（目前一一映射）
+- Plan mode / AskUserQuestion 完整翻译
+- Mode B / C fidelity（LLM 摘要）
+- MCP server
 
 ## 文档
 

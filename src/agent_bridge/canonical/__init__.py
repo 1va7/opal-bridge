@@ -9,6 +9,7 @@ from .schema import (
     ToolResult,
     Attachment,
     Thinking,
+    SummaryCompaction,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "ToolResult",
     "Attachment",
     "Thinking",
+    "SummaryCompaction",
 ]

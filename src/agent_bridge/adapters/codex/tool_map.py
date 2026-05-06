@@ -9,8 +9,18 @@ import json
 import shlex
 from typing import Any
 
+from . import apply_patch as ap
+from .apply_patch import FileStateCache, to_relative
 
-def render_tool_call(tool: str, args: dict[str, Any], call_id: str, cwd: str) -> dict[str, Any]:
+
+def render_tool_call(
+    tool: str,
+    args: dict[str, Any],
+    call_id: str,
+    cwd: str,
+    *,
+    file_state: FileStateCache | None = None,
+) -> dict[str, Any]:
     """
     Return the Codex `response_item.payload` dict for a canonical tool call.
     Most map to function_call (exec_command); apply_patch family go to custom_tool_call.
@@ -80,22 +90,7 @@ def render_tool_call(tool: str, args: dict[str, Any], call_id: str, cwd: str) ->
             "call_id": call_id,
         }
     if tool in {"edit_file", "write_file", "multi_edit_file", "delete_file", "move_file"}:
-        # MVP: not implemented — we'd need apply_patch grammar. Defer to spec 002.
-        # Render a placeholder shell command so the trace is at least readable.
-        path = args.get("path", "?")
-        return {
-            "type": "function_call",
-            "name": "exec_command",
-            "arguments": json.dumps(
-                {
-                    "cmd": f"echo '(translated {tool} on {path} not yet implemented in MVP)'",
-                    "workdir": cwd,
-                    "yield_time_ms": 1000,
-                },
-                ensure_ascii=False,
-            ),
-            "call_id": call_id,
-        }
+        return _render_apply_patch(tool, args, call_id, cwd, file_state)
     # Fallback: passthrough as exec_command echo so call_id pairing remains intact
     return {
         "type": "function_call",
@@ -148,3 +143,53 @@ def _build_rg_command(args: dict[str, Any]) -> str:
     if "offset" in args:
         cmd += f" | tail -n +{int(args['offset'])}"
     return cmd
+
+
+def _render_apply_patch(
+    tool: str,
+    args: dict[str, Any],
+    call_id: str,
+    cwd: str,
+    file_state: FileStateCache | None,
+) -> dict[str, Any]:
+    """Render Edit/Write/MultiEdit/Delete/Move as a custom_tool_call apply_patch."""
+    path = args.get("path", "")
+    rel = to_relative(path, cwd) if path else path
+
+    state = file_state.contents if file_state else {}
+    file_content = state.get(path)
+
+    if tool == "write_file":
+        content = args.get("content", "")
+        existed = path in state
+        patch = ap.patch_for_write(rel, content, file_existed=existed)
+    elif tool == "edit_file":
+        patch = ap.patch_for_edit(
+            rel,
+            args.get("old", ""),
+            args.get("new", ""),
+            file_content=file_content,
+            replace_all=args.get("replace_all", False),
+        )
+    elif tool == "multi_edit_file":
+        patch = ap.patch_for_multi_edit(
+            rel,
+            args.get("edits", []),
+            file_content=file_content,
+        )
+    elif tool == "delete_file":
+        patch = ap.patch_for_delete(rel)
+    elif tool == "move_file":
+        old_rel = to_relative(args.get("from", path), cwd)
+        new_rel = to_relative(args.get("to", path), cwd)
+        patch = ap.patch_for_move(old_rel, new_rel)
+    else:  # safety
+        patch = ap.compose_patch_envelope(f"# unknown tool: {tool}\n")
+
+    return {
+        "type": "custom_tool_call",
+        "status": "completed",
+        "call_id": call_id,
+        "name": "apply_patch",
+        "input": patch,
+    }

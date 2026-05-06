@@ -21,6 +21,7 @@ from agent_bridge.canonical.schema import (
     Notification,
     PlanUpdate,
     Session,
+    SummaryCompaction,
     Thinking,
     ToolCall,
     ToolResult,
@@ -165,9 +166,7 @@ def _translate_line(line: dict[str, Any], src_file: str) -> list[Moment]:
         if line.get("subtype") in DROPPED_SYSTEM_SUBTYPES:
             return []
         if line.get("subtype") == "compact_boundary":
-            raise NotImplementedError(
-                "compact_boundary translation not in MVP; defer to spec 002"
-            )
+            return _translate_compact_boundary(line, ts, src_ref)
         return []
 
     src_ref = {"file": src_file, "uuid": line.get("uuid")}
@@ -193,10 +192,20 @@ def _translate_user(line: dict[str, Any], ts: str, src_ref: dict) -> list[Moment
     if sidechain:
         scope = f"subagent:{line.get('agentId', 'unknown')}"
 
-    # Compact summary user (synthetic)
+    # Compact summary user (synthetic): becomes a UserText preserving the summary text
     if line.get("isCompactSummary"):
-        # MVP: drop these; spec 002 handles compaction
-        return []
+        text = content if isinstance(content, str) else json.dumps(content)
+        return [
+            UserText(
+                ts=ts,
+                source_ref=src_ref,
+                agent_scope=scope,
+                text=text,
+                prompt_id=prompt_id,
+                lossy=True,
+                lossy_reason="synthetic isCompactSummary user; original pre-compact history not preserved",
+            )
+        ]
 
     if isinstance(content, str):
         return [
@@ -329,5 +338,25 @@ def _translate_attachment(line: dict[str, Any], ts: str, src_ref: dict) -> list[
             source_ref=src_ref,
             subtype=subtype,
             data=data,
+        )
+    ]
+
+
+def _translate_compact_boundary(line: dict[str, Any], ts: str, src_ref: dict) -> list[Moment]:
+    """A compact_boundary line marks where prior history was condensed.
+
+    The summary text itself lives in the next CC line (a synthetic user with
+    isCompactSummary=true). Here we just emit a SummaryCompaction marker
+    carrying the metadata; the summary text becomes a regular UserText via
+    _translate_user.
+    """
+    meta = line.get("compactMetadata", {}) or {}
+    return [
+        SummaryCompaction(
+            ts=ts,
+            source_ref=src_ref,
+            trigger=meta.get("trigger", "auto"),
+            before_tokens=meta.get("preTokens"),
+            after_tokens=meta.get("postTokens"),
         )
     ]

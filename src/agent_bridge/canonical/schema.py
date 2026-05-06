@@ -149,6 +149,18 @@ class Notification(_MomentBase):
     ref: str | None = None
 
 
+class SummaryCompaction(_MomentBase):
+    """A compaction marker: prior history was condensed to a summary."""
+
+    kind: Literal["summary_compaction"] = "summary_compaction"
+    trigger: Literal["auto", "manual"] = "auto"
+    before_tokens: int | None = None
+    after_tokens: int | None = None
+    summary_text: str = ""
+    lossy: bool = True
+    lossy_reason: str = "pre-compaction history not preserved across harnesses"
+
+
 class Metadata(_MomentBase):
     kind: Literal["metadata"] = "metadata"
     subtype: str
@@ -167,6 +179,7 @@ Moment = Annotated[
         PlanUpdate,
         Error,
         Notification,
+        SummaryCompaction,
         Metadata,
     ],
     Field(discriminator="kind"),

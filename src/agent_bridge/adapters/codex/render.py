@@ -31,6 +31,7 @@ from agent_bridge.canonical.schema import (
     Notification,
     PlanUpdate,
     Session,
+    SummaryCompaction,
     Thinking,
     ToolCall,
     ToolResult,
@@ -38,6 +39,7 @@ from agent_bridge.canonical.schema import (
 )
 
 from .paths import CODEX_HOME, codex_path
+from .apply_patch import build_file_state, FileStateCache
 from .tool_map import render_tool_call, render_tool_result
 
 
@@ -109,11 +111,14 @@ def render(
     }
     lines.append({"timestamp": tc_ts, "type": "turn_context", "payload": tc_payload})
 
+    # Pre-pass: build per-call file state snapshots for apply_patch context.
+    file_snapshots = build_file_state(session.moments)
+
     # 3+. response_items per moment
     for moment in session.moments:
         if moment.agent_scope.startswith("subagent:") and subagent_strategy == "drop":
             continue
-        rendered = _render_moment(moment, session)
+        rendered = _render_moment(moment, session, file_snapshots)
         lines.extend(rendered)
 
     _write_jsonl(out_path, lines)
@@ -129,10 +134,15 @@ def render(
     )
 
 
-def _render_moment(moment: Moment, session: Session) -> list[dict[str, Any]]:
+def _render_moment(
+    moment: Moment,
+    session: Session,
+    file_snapshots: dict[str, FileStateCache] | None = None,
+) -> list[dict[str, Any]]:
     """Convert one canonical moment to 0+ Codex jsonl lines."""
     cwd = session.cwd
     ts = moment.ts
+    file_snapshots = file_snapshots or {}
 
     if isinstance(moment, UserText):
         return [
@@ -162,7 +172,8 @@ def _render_moment(moment: Moment, session: Session) -> list[dict[str, Any]]:
         return []
 
     if isinstance(moment, ToolCall):
-        payload = render_tool_call(moment.tool, moment.args, moment.call_id, cwd)
+        snap = file_snapshots.get(moment.call_id)
+        payload = render_tool_call(moment.tool, moment.args, moment.call_id, cwd, file_state=snap)
         return [{"timestamp": ts, "type": "response_item", "payload": payload}]
 
     if isinstance(moment, ToolResult):
@@ -235,6 +246,24 @@ def _render_moment(moment: Moment, session: Session) -> list[dict[str, Any]]:
 
     if isinstance(moment, Notification):
         text = f"(notification:{moment.subtype}) {moment.content}"
+        return [
+            {
+                "timestamp": ts,
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": text}],
+                },
+            }
+        ]
+
+    if isinstance(moment, SummaryCompaction):
+        text = (
+            f"(translated compact_boundary, trigger={moment.trigger}, "
+            f"preTokens={moment.before_tokens}, postTokens={moment.after_tokens}) "
+            "Prior conversation history was condensed; the next user message contains the summary."
+        )
         return [
             {
                 "timestamp": ts,

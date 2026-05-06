@@ -505,25 +505,19 @@ def _upsert_state_db(
     try:
         conn = sqlite3.connect(str(db), timeout=5.0)
         try:
+            # Use INSERT OR REPLACE so any stale row codex may have indexed
+            # (e.g., from a previous sync run with different source format)
+            # is fully replaced — avoids partial-update edge cases where
+            # codex had already reconciled a row with empty title.
             conn.execute(
                 """
-                INSERT INTO threads (
+                INSERT OR REPLACE INTO threads (
                     id, rollout_path, created_at, updated_at, source,
                     model_provider, cwd, title, sandbox_policy, approval_mode,
                     tokens_used, has_user_event, archived,
                     cli_version, first_user_message, memory_mode,
                     created_at_ms, updated_at_ms
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    rollout_path=excluded.rollout_path,
-                    updated_at=excluded.updated_at,
-                    source=excluded.source,
-                    model_provider=excluded.model_provider,
-                    cwd=excluded.cwd,
-                    title=excluded.title,
-                    cli_version=excluded.cli_version,
-                    first_user_message=excluded.first_user_message,
-                    updated_at_ms=excluded.updated_at_ms
                 """,
                 (
                     thread_id,

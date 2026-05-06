@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -252,6 +253,42 @@ def install_hook_cmd(
     settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False))
     typer.echo(f"✓ added Stop hook to {settings_path}")
     typer.echo("Hook fires on every CC turn end; runs sync silently. Test by triggering /clear.")
+
+
+mcp_app = typer.Typer(no_args_is_help=True, help="MCP server commands")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("serve")
+def mcp_serve_cmd() -> None:
+    """Run agent-bridge as an MCP stdio server.
+
+    Wire this into any MCP host (Claude Desktop, Cursor, Cline, ...):
+        {
+          "mcpServers": {
+            "agent-bridge": {
+              "command": "<abs path to>/.venv/bin/python",
+              "args": ["-m", "agent_bridge.cli", "mcp", "serve"]
+            }
+          }
+        }
+    """
+    from .mcp_server import serve
+    serve()
+
+
+@mcp_app.command("config-snippet")
+def mcp_config_snippet_cmd() -> None:
+    """Print a ready-to-paste MCP host config block."""
+    py = sys.executable
+    typer.echo(json.dumps({
+        "mcpServers": {
+            "agent-bridge": {
+                "command": py,
+                "args": ["-m", "agent_bridge.cli", "mcp", "serve"],
+            }
+        }
+    }, indent=2))
 
 
 @app.command("clean")

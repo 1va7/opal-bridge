@@ -22,39 +22,53 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 # 列出最近的 CC session
 .venv/bin/python -m agent_bridge.cli list -n 10
 
-# 翻译一份 CC session 到 Codex（默认落到 ~/.codex/sessions/）
-.venv/bin/python -m agent_bridge.cli translate \
-    ~/.claude/projects/<encoded-cwd>/<UUIDv4>.jsonl \
-    --subagent-strategy inline    # 默认 drop；inline 把子 agent transcript 拼进主线
-
-# 一键 smoke：翻译 + 跑 codex exec resume + 自动清理
+# 双向翻译 + 一键 smoke 验证
+# CC → Codex：
 .venv/bin/python -m agent_bridge.cli smoke \
     ~/.claude/projects/<encoded-cwd>/<UUIDv4>.jsonl \
-    --prompt "Reply only with: WORKS"
+    --prompt "Reply with: WORKS"
+# Codex → CC：
+.venv/bin/python -m agent_bridge.cli smoke --from codex \
+    ~/.codex/sessions/YYYY/MM/DD/rollout-...UUIDv7.jsonl \
+    --prompt "Reply with: WORKS"
 
-# 拿到结果后直接复制粘贴用：
-codex exec resume <UUIDv7> "你的新指令"
+# 仅翻译（不 smoke），双向都支持：
+.venv/bin/python -m agent_bridge.cli translate \
+    --from claude-code --to codex \
+    --subagent-strategy inline \
+    ~/.claude/projects/<encoded-cwd>/<UUIDv4>.jsonl
+
+.venv/bin/python -m agent_bridge.cli translate \
+    --from codex --to claude-code \
+    ~/.codex/sessions/YYYY/MM/DD/rollout-...UUIDv7.jsonl
+
+# 拿到结果后直接复制粘贴对应 resume 命令：
+codex exec resume <UUIDv7> "你的新指令"          # 翻成 Codex
+claude --resume <UUIDv4> -p "你的新指令"          # 翻成 CC（在原 cwd 下）
 ```
 
-## 当前能力（截至 spec 002 完成）
+## 当前能力（截至 spec 003 完成）
 
-✅ CC → Codex 单向翻译：
+✅ **双向**翻译 CC ↔ Codex（live resume 都验证通过）：
 - 6 核心工具：Bash / Read / Glob / Grep / WebSearch / 大部分 metadata
-- **apply_patch 真翻译**：Edit / Write / MultiEdit / Delete / Move（含 ≤3 行 context）
+- **apply_patch 双向**：CC Edit/Write/MultiEdit ↔ Codex apply_patch grammar，多 op envelope 自动拆为多个 canonical ToolCall
 - **subagent inline**：自动扫 `<sess>/subagents/`，按 description 匹配后拼进主线
-- **compact_boundary**：优雅处理（不再崩），SummaryCompaction marker + isCompactSummary user
+- **compact_boundary**：双向（CC `compact_boundary` + isCompactSummary user ↔ canonical SummaryCompaction ↔ Codex `compacted` / `context_compaction`）
+- **shell 命令模式识别**：Codex 端的 `cat -n / sed / head / tail / rg --files` 反向回 canonical Read/Glob，避免 round-trip 退化
+- **realpath + NFC**：CC encoded-cwd 与 `claude --resume` 行为一致
 - attachment / skill_listing / nested_memory / file → developer message
-- thinking blocks 自动剥离（signature 跨 harness 不兼容）
+- thinking blocks 自动剥离（signature/encrypted_content 跨 harness 不兼容）
 - phase（commentary / final_answer）跨 CC line 推断
-- 15 个 pytest 测试 + live `codex exec resume` 验证通过
+- 18 个 pytest（含 round-trip）+ live `codex exec resume` + live `claude --resume` 验证
 
 ❌ 推迟（见 `specs/`）：
-- Codex → CC 反向翻译（spec 003）
 - DAG 多 leaf 选择
-- TaskCreate stateful diff（目前一一映射）
+- TaskCreate 完整 stateful diff（目前 1:1 映射）
 - Plan mode / AskUserQuestion 完整翻译
 - Mode B / C fidelity（LLM 摘要）
 - MCP server
+- Hermes adapter
+- 与像素级蒸馏整合
 
 ## 文档
 

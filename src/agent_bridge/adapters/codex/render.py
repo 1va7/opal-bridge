@@ -197,6 +197,13 @@ def _render_moment(
     file_snapshots = file_snapshots or {}
 
     if isinstance(moment, UserText):
+        # Codex's title extractor (codex-rs/state/src/extract.rs)
+        # only reads `EventMsg::UserMessage`, NOT response_item.message.
+        # Without an event_msg mirror, our session has empty title in
+        # state_5.sqlite even though the response_item is present. So we
+        # emit BOTH: the response_item (for resume) AND an event_msg
+        # mirror (so codex's reconcile sets title/first_user_message
+        # from this user prompt).
         return [
             {
                 "timestamp": ts,
@@ -206,7 +213,18 @@ def _render_moment(
                     "role": "user",
                     "content": [{"type": "input_text", "text": moment.text}],
                 },
-            }
+            },
+            {
+                "timestamp": ts,
+                "type": "event_msg",
+                "payload": {
+                    "type": "user_message",
+                    "message": moment.text,
+                    "images": [],
+                    "local_images": [],
+                    "text_elements": [],
+                },
+            },
         ]
 
     if isinstance(moment, AssistantText):

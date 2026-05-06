@@ -20,7 +20,10 @@ def _read_jsonl(p: Path) -> list[dict]:
 
 
 def test_translate_fixture_structure(tmp_path: Path) -> None:
-    """Translator output must structurally match the hand-crafted PoC reference."""
+    """Translator output must structurally match the hand-crafted PoC reference,
+    accounting for the event_msg user_message mirrors we emit so codex's title
+    extractor populates SQLite.
+    """
     res = translate(
         source_path=FIXTURE,
         source_harness="claude-code",
@@ -31,18 +34,20 @@ def test_translate_fixture_structure(tmp_path: Path) -> None:
     out_lines = _read_jsonl(res.primary_path)
     ref_lines = _read_jsonl(HAND_TRANSLATED)
 
-    # Same line count
-    assert len(out_lines) == len(ref_lines), (
-        f"line count mismatch: got {len(out_lines)}, expected {len(ref_lines)}"
+    # We emit one event_msg.user_message per user prompt (so codex extracts
+    # title from it). The hand-crafted reference doesn't have these mirrors.
+    out_dialog = [l for l in out_lines if l.get("type") != "event_msg"]
+    assert len(out_dialog) == len(ref_lines), (
+        f"dialog line count mismatch: got {len(out_dialog)} (excluding event_msg), expected {len(ref_lines)}"
     )
 
-    # Same top-level type sequence
-    out_types = [l["type"] for l in out_lines]
+    # Same top-level type sequence (excluding event_msg)
+    out_types = [l["type"] for l in out_dialog]
     ref_types = [l["type"] for l in ref_lines]
     assert out_types == ref_types
 
     # Same payload types
-    out_pls = [l.get("payload", {}).get("type") for l in out_lines]
+    out_pls = [l.get("payload", {}).get("type") for l in out_dialog]
     ref_pls = [l.get("payload", {}).get("type") for l in ref_lines]
     assert out_pls == ref_pls
 
@@ -55,6 +60,22 @@ def test_translate_fixture_structure(tmp_path: Path) -> None:
     # Second line must be turn_context referencing same cwd
     assert out_lines[1]["type"] == "turn_context"
     assert out_lines[1]["payload"]["cwd"] == out_lines[0]["payload"]["cwd"]
+
+    # Verify event_msg user_message mirrors exist for each user_text
+    user_response_count = sum(
+        1 for l in out_lines
+        if l["type"] == "response_item"
+        and l["payload"].get("type") == "message"
+        and l["payload"].get("role") == "user"
+    )
+    user_event_count = sum(
+        1 for l in out_lines
+        if l["type"] == "event_msg"
+        and l["payload"].get("type") == "user_message"
+    )
+    assert user_response_count == user_event_count, (
+        "every user response_item must have a matching event_msg.user_message"
+    )
 
     # tool_use ↔ tool_result call_id pairing preserved
     pairs: dict[str, dict] = {}
@@ -71,11 +92,11 @@ def test_translate_fixture_structure(tmp_path: Path) -> None:
     assistant_msgs = [
         (i, l)
         for i, l in enumerate(out_lines)
-        if l["payload"].get("type") == "message" and l["payload"].get("role") == "assistant"
+        if l["type"] == "response_item"
+        and l["payload"].get("type") == "message"
+        and l["payload"].get("role") == "assistant"
     ]
-    # The first assistant message is mid-turn (tool call follows)
     assert assistant_msgs[0][1]["payload"]["phase"] == "commentary"
-    # The last is final
     assert assistant_msgs[-1][1]["payload"]["phase"] == "final_answer"
 
 

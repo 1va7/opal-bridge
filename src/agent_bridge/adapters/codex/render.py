@@ -173,6 +173,7 @@ def render(
 
     _write_jsonl(out_path, lines)
     _append_thread_name(home, uuid, _make_thread_name(session))
+    _upsert_state_db(home, uuid, out_path, session, model_provider)
 
     resume_command = f'codex exec resume {uuid} "<your prompt>" -o /tmp/agent-bridge-resume.md'
 
@@ -458,6 +459,111 @@ def _append_thread_name(codex_home: Path, thread_id: str, thread_name: str) -> N
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError as e:
         logger.warning("failed to append %s: %s", idx_path, e)
+
+
+def _upsert_state_db(
+    codex_home: Path,
+    thread_id: str,
+    rollout_path: Path,
+    session: Session,
+    model_provider: str | None,
+) -> None:
+    """Insert/update a row into ~/.codex/state_5.sqlite threads table.
+
+    Codex's resume picker pulls thread metadata from this DB. Files that
+    only exist on disk (without a corresponding row) DO NOT show up in the
+    picker, even though they're discoverable by UUID via `codex resume <uuid>`.
+
+    We write minimum required fields with sensible defaults. Codex will
+    reconcile the row on next access (filling in token counts, etc.).
+    """
+    import sqlite3
+    from datetime import datetime, timezone
+    db = codex_home / "state_5.sqlite"
+    if not db.exists():
+        return  # Codex hasn't initialized; let it create on next start
+
+    title = _make_thread_name(session)
+    first_msg = _first_real_user_text(session) or session.source_session_id
+    if first_msg is None:
+        first_msg = thread_id
+    first_msg = first_msg.replace("\n", " ").strip()
+    if len(first_msg) > 200:
+        first_msg = first_msg[:200]
+
+    started_at = session.started_at or datetime.now(timezone.utc).isoformat()
+    try:
+        from agent_bridge.canonical.ids import parse_cc_iso
+        ts = int(parse_cc_iso(started_at).timestamp())
+    except Exception:
+        ts = int(datetime.now(timezone.utc).timestamp())
+    ts_ms = ts * 1000
+
+    # Use the user's configured provider so the picker's provider filter accepts us
+    provider = model_provider or _read_user_default_provider(codex_home) or "openai"
+
+    try:
+        conn = sqlite3.connect(str(db), timeout=5.0)
+        try:
+            conn.execute(
+                """
+                INSERT INTO threads (
+                    id, rollout_path, created_at, updated_at, source,
+                    model_provider, cwd, title, sandbox_policy, approval_mode,
+                    tokens_used, has_user_event, archived,
+                    cli_version, first_user_message, memory_mode,
+                    created_at_ms, updated_at_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    rollout_path=excluded.rollout_path,
+                    updated_at=excluded.updated_at,
+                    source=excluded.source,
+                    model_provider=excluded.model_provider,
+                    cwd=excluded.cwd,
+                    title=excluded.title,
+                    cli_version=excluded.cli_version,
+                    first_user_message=excluded.first_user_message,
+                    updated_at_ms=excluded.updated_at_ms
+                """,
+                (
+                    thread_id,
+                    str(rollout_path),
+                    ts,
+                    ts,
+                    "cli",
+                    provider,
+                    session.cwd,
+                    title,
+                    '{"type":"danger-full-access"}',
+                    "never",
+                    0,
+                    1,
+                    0,
+                    "0.1.0",
+                    first_msg,
+                    "enabled",
+                    ts_ms,
+                    ts_ms,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        logger.warning("state_db upsert failed for %s: %s", thread_id, e)
+
+
+def _read_user_default_provider(codex_home: Path) -> str | None:
+    """Read user's default model_provider from ~/.codex/config.toml."""
+    cfg = codex_home / "config.toml"
+    if not cfg.exists():
+        return None
+    try:
+        import tomllib
+        data = tomllib.loads(cfg.read_text(encoding="utf-8"))
+        return data.get("model_provider")
+    except Exception:
+        return None
 
 
 def _match_subagent_calls(session: Session) -> dict[str, str]:

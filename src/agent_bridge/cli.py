@@ -83,41 +83,66 @@ def list_cmd(
 
 @app.command("smoke")
 def smoke_cmd(
-    source_path: Path = typer.Argument(..., help="Source CC jsonl path"),
-    prompt: str = typer.Option("Reply with: WORKS", "--prompt", help="Test prompt for codex resume"),
+    source_path: Path = typer.Argument(..., help="Source CC or Codex jsonl path"),
+    from_: str = typer.Option("claude-code", "--from", help="Source harness: claude-code | codex"),
+    to: str = typer.Option(None, "--to", help="Target harness (default: opposite of --from)"),
+    prompt: str = typer.Option("Reply with: WORKS", "--prompt", help="Test prompt for resume"),
     model: str = typer.Option("gpt-5.5", "--model"),
     keep: bool = typer.Option(False, "--keep", help="Keep the translated jsonl after the test"),
 ) -> None:
-    """Translate then immediately run `codex exec resume` to verify end-to-end."""
+    """Translate then immediately run resume to verify end-to-end."""
+    if to is None:
+        to = "codex" if from_ == "claude-code" else "claude-code"
     res = translate(
         source_path=source_path,
-        source_harness="claude-code",
-        target_harness="codex",
-        target_dir=None,  # default ~/.codex/sessions
+        source_harness=from_,
+        target_harness=to,
+        target_dir=None,
         model_name=model,
     )
     typer.echo(f"translated: {res.session_id}")
     typer.echo(f"file:       {res.primary_path}")
 
-    cmd = [
-        "codex", "exec", "resume",
-        res.session_id, prompt,
-        "--skip-git-repo-check",
-        "-o", "/tmp/agent-bridge-smoke.md",
-    ]
+    # Build the resume command for the target harness
+    if to == "codex":
+        cmd = [
+            "codex", "exec", "resume",
+            res.session_id, prompt,
+            "--skip-git-repo-check",
+            "-o", "/tmp/agent-bridge-smoke.md",
+        ]
+    elif to == "claude-code":
+        cmd = ["claude", "--resume", res.session_id, "-p", prompt]
+    else:
+        typer.echo(f"unknown target: {to}", err=True)
+        raise typer.Exit(2)
     typer.echo(f"\nrunning: {' '.join(cmd)}\n")
+
+    cwd_for_resume = None
+    if to == "claude-code":
+        # claude --resume scans the encoded-cwd of the process cwd; need to cd to session.cwd
+        # We don't have the session here, but the rendered jsonl encodes it; pull from path:
+        # path: ~/.claude/projects/<encoded>/<id>.jsonl — encoded reflects realpath(session.cwd)
+        # Easier: read the first line of the rendered file
+        try:
+            first = next(open(res.primary_path), "{}")
+            import json as _j
+            cwd_for_resume = _j.loads(first).get("cwd")
+        except Exception:
+            pass
+
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=cwd_for_resume)
     except FileNotFoundError:
-        typer.echo("ERROR: `codex` not on PATH. Install Codex CLI first.", err=True)
+        typer.echo(f"ERROR: `{cmd[0]}` not on PATH.", err=True)
         raise typer.Exit(2)
     except subprocess.TimeoutExpired:
-        typer.echo("ERROR: codex exec resume timed out after 120s", err=True)
+        typer.echo("ERROR: resume timed out after 120s", err=True)
         raise typer.Exit(3)
 
     typer.echo(proc.stdout[-2000:])
     if proc.returncode != 0:
-        typer.echo(f"codex exited {proc.returncode}", err=True)
+        typer.echo(f"resume exited {proc.returncode}", err=True)
         typer.echo(proc.stderr[-1000:], err=True)
     else:
         typer.echo("\n✓ resume succeeded")

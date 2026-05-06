@@ -92,10 +92,11 @@ def test_translate_session_id_is_uuidv7(tmp_path: Path) -> None:
 
 
 def test_unsupported_direction_raises(tmp_path: Path) -> None:
+    """Hermes adapter not implemented yet; pair should still raise."""
     with pytest.raises(NotImplementedError):
         translate(
             source_path=FIXTURE,
-            source_harness="codex",
-            target_harness="claude-code",
+            source_harness="hermes",
+            target_harness="codex",
             target_dir=tmp_path,
         )

@@ -17,6 +17,8 @@ _RENDER_OPTS = {
     "model_provider",
     "timezone_name",
     "cc_version",
+    "session_id",
+    "title_prefix",
 }
 
 

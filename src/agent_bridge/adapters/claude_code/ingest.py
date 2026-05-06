@@ -214,15 +214,15 @@ def _translate_line(line: dict[str, Any], src_file: str) -> list[Moment]:
     line_type = line.get("type")
     if line_type in DROPPED_TYPES:
         return []
+    src_ref = {"file": src_file, "uuid": line.get("uuid")}
+    ts = line.get("timestamp", iso_now_z())
+
     if line_type == "system":
         if line.get("subtype") in DROPPED_SYSTEM_SUBTYPES:
             return []
         if line.get("subtype") == "compact_boundary":
             return _translate_compact_boundary(line, ts, src_ref)
         return []
-
-    src_ref = {"file": src_file, "uuid": line.get("uuid")}
-    ts = line.get("timestamp", iso_now_z())
 
     if line_type == "user":
         return _translate_user(line, ts, src_ref)

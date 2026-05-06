@@ -83,15 +83,23 @@ def render(
     fidelity: str = "A",
     subagent_strategy: str = "drop",
     cc_version: str = "2.1.131",
+    session_id: str | None = None,
+    title_prefix: str | None = None,
     **_unused: Any,
 ) -> CcRenderResult:
-    """Canonical → CC jsonl, one file under ~/.claude/projects/<encoded>/."""
+    """Canonical → CC jsonl, one file under ~/.claude/projects/<encoded>/.
+
+    `session_id`: deterministic UUID override (idempotent sync).
+    `title_prefix`: if set, an extra `custom-title` line is written so the
+        translated session is recognizable in `claude --resume` picker.
+        Example: "[from codex] ".
+    """
     home_projects = Path(target_dir) if target_dir else CC_PROJECTS
     encoded = encode_cwd(session.cwd)
     proj_dir = home_projects / encoded
     proj_dir.mkdir(parents=True, exist_ok=True)
 
-    sess_id = new_uuid_v4()
+    sess_id = session_id or new_uuid_v4()
     out_path = proj_dir / f"{sess_id}.jsonl"
 
     warnings: list[str] = []
@@ -103,6 +111,16 @@ def render(
 
     lines: list[dict[str, Any]] = []
     parent: str | None = None
+
+    if title_prefix:
+        # First user prompt summary as title body
+        first_user = next((m for m in session.moments if hasattr(m, "text") and m.kind == "user_text"), None)
+        body = (first_user.text[:60] if first_user else session.source_session_id)
+        lines.append({
+            "type": "custom-title",
+            "customTitle": f"{title_prefix}{body}".replace("\n", " "),
+            "sessionId": sess_id,
+        })
 
     for moment in session.moments:
         cc_lines = _render_moment(moment, session, sess_id, cc_version, parent_uuid=parent)

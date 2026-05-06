@@ -6,19 +6,49 @@ needed, just a small helper). See RFC 9562 Section 5.7.
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import time
 from datetime import datetime, timezone
 
 
 def uuid7_str() -> str:
-    """Generate a UUIDv7 (millisecond timestamp + random)."""
+    """Generate a random UUIDv7 (millisecond timestamp + random)."""
     ms = int(time.time() * 1000)
     rand_a = secrets.randbits(12)
     rand_b = secrets.randbits(62)
+    return _format_uuid7(ms, rand_a, rand_b)
+
+
+def deterministic_uuid7(seed: str, ts_iso: str) -> str:
+    """Stable UUIDv7 for `(seed, ts)` — same inputs always produce same UUID.
+
+    Use for idempotent sync: re-translating the same source session always
+    targets the same path so we just overwrite instead of accumulating files.
+    """
+    dt = parse_cc_iso(ts_iso)
+    ms = int(dt.timestamp() * 1000)
+    h = hashlib.sha256(f"agent-bridge:{seed}".encode("utf-8")).digest()
+    rand_a = int.from_bytes(h[:2], "big") & 0xFFF
+    rand_b = int.from_bytes(h[2:10], "big") & ((1 << 62) - 1)
+    return _format_uuid7(ms, rand_a, rand_b)
+
+
+def deterministic_uuid4(seed: str) -> str:
+    """Stable UUIDv4-shaped string for `seed`. Used for CC target IDs.
+
+    CC validates the regex shape but not the version semantics, so we set
+    nibble[12]=4 and nibble[16]=8 to match v4 conventions while remaining
+    deterministic.
+    """
+    h = hashlib.sha256(f"agent-bridge:{seed}".encode("utf-8")).hexdigest()
+    return f"{h[0:8]}-{h[8:12]}-4{h[13:16]}-8{h[17:20]}-{h[20:32]}"
+
+
+def _format_uuid7(ms: int, rand_a: int, rand_b: int) -> str:
     val = (ms & 0xFFFFFFFFFFFF) << 80
     val |= 0x7 << 76
-    val |= rand_a << 64
+    val |= (rand_a & 0xFFF) << 64
     val |= 0b10 << 62
     val |= rand_b & ((1 << 62) - 1)
     h = f"{val:032x}"

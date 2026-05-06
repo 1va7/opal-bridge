@@ -64,11 +64,19 @@ def render(
     model_name: str = "gpt-5.5",
     model_provider: str = "openai",
     timezone_name: str = "Asia/Shanghai",
+    session_id: str | None = None,
+    title_prefix: str | None = None,  # ignored by codex render; here for CLI compat
+    **_unused: Any,
 ) -> RenderResult:
-    """Write canonical session as a Codex rollout jsonl."""
+    """Write canonical session as a Codex rollout jsonl.
+
+    `session_id` (optional): override the generated UUIDv7. Pass a
+    deterministic UUID (e.g., from `deterministic_uuid7`) to make sync
+    idempotent — re-rendering with the same id overwrites the same file.
+    """
     home = Path(target_dir) if target_dir else CODEX_HOME
 
-    uuid = uuid7_str()
+    uuid = session_id or uuid7_str()
     started_iso = session.started_at
     out_path = codex_path(uuid, started_iso, codex_home=home)
     out_path.parent.mkdir(parents=True, exist_ok=True)

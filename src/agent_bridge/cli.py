@@ -430,6 +430,9 @@ def clean_cmd(
         except OSError as e:
             typer.echo(f"  failed to remove {t}: {e}", err=True)
     typer.echo(f"\n✓ removed {len(targets)} files")
+    # Wipe sync state so next sync re-translates from scratch
+    from .sync_state import clear as _clear_sync_state
+    _clear_sync_state()
 
 
 if __name__ == "__main__":

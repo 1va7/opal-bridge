@@ -109,16 +109,14 @@ def _try_translate_one(
         stats.skipped_active += 1
         return
 
+    direction_key = f"{src_harness}-to-{tgt_harness}"
+    from agent_bridge import sync_state
+    fingerprint = _fingerprint_for(source_path, src_harness)
+    if sync_state.is_unchanged(source_path, direction_key, fingerprint):
+        stats.skipped_existing += 1
+        return
+
     target_path, target_id = _expected_target(source_path, src_harness, tgt_harness)
-    if target_path.exists():
-        try:
-            target_mtime = target_path.stat().st_mtime
-            source_mtime = source_path.stat().st_mtime
-            if target_mtime >= source_mtime:
-                stats.skipped_existing += 1
-                return
-        except OSError:
-            pass
 
     try:
         ingest_fn = _ingest_for(src_harness)
@@ -131,12 +129,26 @@ def _try_translate_one(
             title_prefix=title_prefix,
             subagent_strategy="inline",
         )
+        sync_state.mark_translated(source_path, direction_key, fingerprint)
         stats.translated += 1
         log(f"  ✓ {src_harness}→{tgt_harness}: {source_path.name} → {target_id}")
     except Exception as e:
         stats.failed += 1
         stats.failures.append((str(source_path), str(e)))
         log(f"  ✗ {source_path.name}: {e}")
+
+
+def _fingerprint_for(path: Path, harness: str) -> str:
+    """Detect changes that don't show in file size/mtime — chiefly Codex
+    user-set thread_names (which only update session_index.jsonl)."""
+    if harness != "codex":
+        return ""
+    codex_id = _extract_codex_id_from_filename(path.name)
+    if not codex_id:
+        return ""
+    from agent_bridge.adapters.codex.ingest import _read_codex_thread_name
+    name = _read_codex_thread_name(codex_id) or ""
+    return f"name:{name}"
 
 
 def _ingest_for(harness: str):
@@ -282,8 +294,10 @@ def _list_codex_sessions(cutoff_mtime: float) -> list[Path]:
                 continue
         except OSError:
             continue
-        if _is_agent_bridge_codex(f):
-            continue
+        # Note: we used to filter agent-bridge files here, but that hid
+        # user renames / extensions of our translations. Sync_state
+        # fingerprint (incl. user thread_name) handles idempotency now;
+        # see _try_translate_one.
         out.append(f)
     out.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return out

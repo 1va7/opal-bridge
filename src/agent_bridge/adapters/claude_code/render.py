@@ -113,11 +113,25 @@ def render(
     parent: str | None = None
 
     if title_prefix:
-        # First user prompt summary as title body — but skip Codex/CC harness
-        # injection envelopes like <environment_context>, <permissions ...>,
-        # <skills_instructions>, etc., which always start a Codex session.
+        # Prefer codex thread_name (set via codex's `/name` command) over
+        # the first user prompt — that's the user-chosen label and they'll
+        # be looking for it in the CC picker.
+        codex_thread_name = (
+            session.source_metadata.get("codex", {}).get("thread_name")
+            if session.source_harness == "codex"
+            else None
+        )
         first_user = _first_real_user_text(session)
-        body = (first_user[:60] if first_user else session.source_session_id)
+        if codex_thread_name:
+            # If codex thread_name itself starts with [from claude-code], it's our
+            # own roundtrip label — strip the prefix to avoid nested markers.
+            body = codex_thread_name
+            for marker in ("[from claude-code] ", "[from codex] "):
+                if body.startswith(marker):
+                    body = body[len(marker):]
+                    break
+        else:
+            body = first_user[:60] if first_user else session.source_session_id
         lines.append({
             "type": "custom-title",
             "customTitle": f"{title_prefix}{body}".replace("\n", " "),
@@ -131,6 +145,7 @@ def render(
             parent = ln["uuid"]
 
     _write_jsonl(out_path, lines)
+    _backdate_mtime(out_path, session)
 
     resume_cmd = f'claude --resume {sess_id}'
 
@@ -421,6 +436,28 @@ def _write_jsonl(path: Path, lines: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for ln in lines:
             f.write(json.dumps(ln, ensure_ascii=False) + "\n")
+
+
+def _backdate_mtime(path: Path, session) -> None:
+    """Set file mtime to latest moment timestamp so CC picker shows the
+    session's actual age rather than the sync time.
+    """
+    import os
+    from agent_bridge.canonical.ids import parse_cc_iso
+    candidates = []
+    if session.ended_at:
+        candidates.append(session.ended_at)
+    if session.moments:
+        candidates.append(session.moments[-1].ts)
+    if session.started_at:
+        candidates.append(session.started_at)
+    if not candidates:
+        return
+    try:
+        latest = max(parse_cc_iso(c).timestamp() for c in candidates if c)
+        os.utime(path, (latest, latest))
+    except (ValueError, OSError):
+        pass
 
 
 # Codex injects these XML-shaped envelopes as the FIRST user/developer message

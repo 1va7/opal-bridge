@@ -62,6 +62,11 @@ def ingest(jsonl_path: Path | str, **opts: Any) -> Session:
 
     moments.sort(key=lambda m: m.ts)
 
+    # If user named the thread in codex (`/name <foo>`), session_index.jsonl
+    # holds the latest thread_name keyed by session id. Pull it so the CC
+    # render can use it as title body instead of the first user prompt.
+    thread_name = _read_codex_thread_name(meta.get("id"))
+
     return Session(
         id=uuid7_str(),
         source_harness="codex",
@@ -93,9 +98,46 @@ def ingest(jsonl_path: Path | str, **opts: Any) -> Session:
                 "model_provider": meta.get("model_provider"),
                 "personality": tc.get("personality"),
                 "collaboration_mode": tc.get("collaboration_mode"),
+                "thread_name": thread_name,
             }
         },
     )
+
+
+def _read_codex_thread_name(session_id: str | None) -> str | None:
+    """Reverse-scan ~/.codex/session_index.jsonl; return the latest **user-set**
+    thread_name for the given id. Skips entries whose name was written by
+    agent-bridge itself (matches `[from claude-code] ...` / `[from codex] ...`).
+
+    Returns None if no user-set name exists.
+    """
+    if not session_id:
+        return None
+    from agent_bridge.adapters.codex.paths import CODEX_HOME
+    idx_path = CODEX_HOME / "session_index.jsonl"
+    if not idx_path.exists():
+        return None
+    user_set: str | None = None
+    try:
+        with idx_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("id") != session_id:
+                    continue
+                name = ev.get("thread_name", "") or ""
+                # Skip our own auto-generated labels — they're not user choice
+                if name.startswith("[from "):
+                    continue
+                user_set = name
+    except OSError:
+        pass
+    return user_set
 
 
 def _read_jsonl(p: Path) -> list[dict[str, Any]]:

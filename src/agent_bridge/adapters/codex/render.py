@@ -172,6 +172,7 @@ def render(
             lines.extend(_render_subagent_transcript(sa_id, sub_moments, session, file_snapshots))
 
     _write_jsonl(out_path, lines)
+    _backdate_mtime(out_path, session)
     _append_thread_name(home, uuid, _make_thread_name(session))
     _upsert_state_db(home, uuid, out_path, session, model_provider)
 
@@ -417,6 +418,29 @@ def _write_jsonl(path: Path, lines: list[dict[str, Any]]) -> None:
             f.write(json.dumps(ln, ensure_ascii=False) + "\n")
 
 
+def _backdate_mtime(path: Path, session: Session) -> None:
+    """Set file mtime to the latest moment timestamp (or session.ended_at)
+    so codex's resume picker shows the session's actual activity time
+    rather than the time we synced it.
+    """
+    import os
+    from agent_bridge.canonical.ids import parse_cc_iso
+    candidates = []
+    if session.ended_at:
+        candidates.append(session.ended_at)
+    if session.moments:
+        candidates.append(session.moments[-1].ts)
+    if session.started_at:
+        candidates.append(session.started_at)
+    if not candidates:
+        return
+    try:
+        latest = max(parse_cc_iso(c).timestamp() for c in candidates if c)
+        os.utime(path, (latest, latest))
+    except (ValueError, OSError):
+        pass
+
+
 # Codex's harness wraps every session start with this synthetic envelope.
 # Skip it when picking a title body so users see real prompts.
 _CODEX_ENVELOPE_PREFIXES = (
@@ -463,9 +487,36 @@ def _append_thread_name(codex_home: Path, thread_id: str, thread_name: str) -> N
     """Append a SessionIndexEntry to ~/.codex/session_index.jsonl so the
     resume picker shows a recognizable label in the Conversation column.
     Append-only — last entry wins per Codex's reverse-scan logic.
+
+    If the user has previously renamed this session via codex's `/name`
+    command (a thread_name not matching our `[from ...]` format), do NOT
+    overwrite — respect the user's choice.
     """
     from datetime import datetime, timezone
     idx_path = codex_home / "session_index.jsonl"
+
+    # Check existing entries — skip if user has set their own name
+    if idx_path.exists():
+        try:
+            with idx_path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if ev.get("id") != thread_id:
+                        continue
+                    name = ev.get("thread_name", "") or ""
+                    if name and not name.startswith("[from "):
+                        # User-set name exists; don't pollute the index with
+                        # auto-generated label that would override it.
+                        return
+        except OSError:
+            pass
+
     entry = {
         "id": thread_id,
         "thread_name": thread_name,
@@ -502,6 +553,11 @@ def _upsert_state_db(
         return  # Codex hasn't initialized; let it create on next start
 
     title = _make_thread_name(session)
+    # If user has set their own title via codex (`/name`) preserve it.
+    existing_user_title = _peek_existing_user_title(db, thread_id)
+    if existing_user_title:
+        title = existing_user_title
+
     first_msg = _first_real_user_text(session) or session.source_session_id
     if first_msg is None:
         first_msg = thread_id
@@ -576,6 +632,33 @@ def _read_user_default_provider(codex_home: Path) -> str | None:
         return data.get("model_provider")
     except Exception:
         return None
+
+
+def _peek_existing_user_title(db_path: Path, thread_id: str) -> str | None:
+    """Look up an existing title for thread_id in state_5.sqlite. Return it
+    only if it's a user-set title (not our `[from ...]` auto label and not
+    empty)."""
+    import sqlite3
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=5.0)
+        try:
+            row = conn.execute(
+                "SELECT title FROM threads WHERE id = ?", (thread_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    if not row:
+        return None
+    title = (row[0] or "").strip()
+    if not title:
+        return None
+    if title.startswith("[from "):
+        return None
+    return title
 
 
 def _match_subagent_calls(session: Session) -> dict[str, str]:

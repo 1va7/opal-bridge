@@ -204,22 +204,33 @@ def watch_cmd(
 
 @app.command("install-hook")
 def install_hook_cmd(
-    target: str = typer.Option("claude-code", "--target", help="claude-code (writes ~/.claude/settings.json Stop hook)"),
-    direction: str = typer.Option("cc-to-codex", "--direction"),
+    target: str = typer.Option("claude-code", "--target", help="claude-code | codex"),
+    direction: str = typer.Option(None, "--direction", help="default: opposite of --target (cc-to-codex if target=claude-code)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print what would be added, don't write"),
 ) -> None:
-    """Wire `agent-bridge sync` into your harness's stop/notification hook."""
-    if target != "claude-code":
-        typer.echo(f"hook target {target!r} not supported; only claude-code for now", err=True)
+    """Wire `agent-bridge sync` into your harness's stop/notification hook.
+
+    --target claude-code → adds a Stop hook to ~/.claude/settings.json
+    --target codex       → updates the `notify` array in ~/.codex/config.toml
+    """
+    if direction is None:
+        direction = "cc-to-codex" if target == "claude-code" else "codex-to-cc"
+
+    py = Path(sys.executable).resolve()
+    cmd_str = f"{py} -m agent_bridge.cli sync --direction {direction} --days 1 >/dev/null 2>&1"
+
+    if target == "claude-code":
+        _install_cc_hook(cmd_str, dry_run)
+    elif target == "codex":
+        _install_codex_notify(cmd_str, dry_run)
+    else:
+        typer.echo(f"unknown target: {target!r}", err=True)
         raise typer.Exit(2)
 
-    import json
+
+def _install_cc_hook(cmd_str: str, dry_run: bool) -> None:
     settings_path = Path.home() / ".claude" / "settings.json"
-    cmd = (
-        f"{Path(sys.executable).resolve()} -m agent_bridge.cli sync "
-        f"--direction {direction} --days 1 >/dev/null 2>&1"
-    )
-    new_hook = {"type": "command", "command": cmd}
+    new_hook = {"type": "command", "command": cmd_str}
 
     settings: dict = {}
     if settings_path.exists():
@@ -230,7 +241,6 @@ def install_hook_cmd(
             raise typer.Exit(3)
     hooks = settings.setdefault("hooks", {})
     stop_hooks = hooks.setdefault("Stop", [])
-    # Find a matcher="*" group, or create one
     target_group = None
     for g in stop_hooks:
         if g.get("matcher") in ("*", None):
@@ -240,19 +250,98 @@ def install_hook_cmd(
         target_group = {"matcher": "*", "hooks": []}
         stop_hooks.append(target_group)
     cmds = target_group.setdefault("hooks", [])
-    if any(h.get("command") == cmd for h in cmds):
-        typer.echo("hook already installed; nothing to do.")
+    if any(h.get("command") == cmd_str for h in cmds):
+        typer.echo("CC Stop hook already installed; nothing to do.")
         return
     cmds.append(new_hook)
 
     if dry_run:
-        typer.echo("would write the following to ~/.claude/settings.json:")
+        typer.echo("would write to ~/.claude/settings.json:")
         typer.echo(json.dumps(settings, indent=2, ensure_ascii=False))
         return
-
     settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False))
     typer.echo(f"✓ added Stop hook to {settings_path}")
-    typer.echo("Hook fires on every CC turn end; runs sync silently. Test by triggering /clear.")
+    typer.echo("Hook fires on every CC turn end; runs sync silently.")
+
+
+def _install_codex_notify(cmd_str: str, dry_run: bool) -> None:
+    """Update ~/.codex/config.toml `notify` field to chain our sync.
+
+    Codex's legacy notify spawns the argv with the event JSON as final arg.
+    We use `sh -c "<existing>; <our cmd>"` form. The trailing JSON argv from
+    Codex becomes $0 for the sh script and is ignored.
+    """
+    config_path = Path.home() / ".codex" / "config.toml"
+    if not config_path.exists():
+        typer.echo(f"{config_path} does not exist. Run codex once first to create it.", err=True)
+        raise typer.Exit(3)
+
+    try:
+        import tomllib
+    except ImportError:
+        typer.echo("Python 3.11+ required for tomllib.", err=True)
+        raise typer.Exit(3)
+
+    raw_text = config_path.read_text(encoding="utf-8")
+    try:
+        cfg = tomllib.loads(raw_text)
+    except Exception as e:
+        typer.echo(f"config.toml is not valid TOML: {e}", err=True)
+        raise typer.Exit(3)
+
+    existing = cfg.get("notify")
+    new_inner_cmd: str
+    if isinstance(existing, list) and len(existing) >= 3 and existing[0] in ("sh", "/bin/sh") and existing[1] == "-c":
+        # extend existing sh -c "..."
+        existing_inner = existing[2]
+        if cmd_str in existing_inner:
+            typer.echo("Codex notify hook already chains our sync; nothing to do.")
+            return
+        new_inner_cmd = f"{existing_inner}; {cmd_str}"
+    elif existing in (None, []):
+        new_inner_cmd = cmd_str
+    else:
+        # Other shapes — preserve by chaining via sh -c
+        existing_str = " ".join(str(x) for x in existing) if isinstance(existing, list) else str(existing)
+        new_inner_cmd = f"{existing_str}; {cmd_str}"
+
+    new_notify_array = ["sh", "-c", new_inner_cmd]
+    new_line = f'notify = {json.dumps(new_notify_array)}'
+
+    # Replace or insert the notify line in the original text (preserve other formatting).
+    import re
+    notify_pattern = re.compile(r"^notify\s*=\s*.*$", re.MULTILINE)
+    if notify_pattern.search(raw_text):
+        new_text = notify_pattern.sub(new_line, raw_text, count=1)
+    else:
+        # Insert near the top, after any leading comments
+        lines = raw_text.splitlines()
+        insert_at = 0
+        for i, ln in enumerate(lines):
+            stripped = ln.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                insert_at = i
+                break
+        lines.insert(insert_at, new_line)
+        new_text = "\n".join(lines) + ("\n" if not raw_text.endswith("\n") else "")
+
+    if dry_run:
+        typer.echo(f"would write to {config_path}:")
+        typer.echo(f"  {new_line}")
+        typer.echo("\nfull diff (notify line only):")
+        for line in raw_text.splitlines():
+            if notify_pattern.match(line):
+                typer.echo(f"- {line}")
+        typer.echo(f"+ {new_line}")
+        return
+
+    # Backup before write
+    backup = config_path.with_suffix(".toml.bak")
+    backup.write_text(raw_text, encoding="utf-8")
+    config_path.write_text(new_text, encoding="utf-8")
+    typer.echo(f"✓ updated {config_path}")
+    typer.echo(f"  backup saved to {backup}")
+    typer.echo("Hook fires on every Codex turn end; runs sync silently.")
 
 
 mcp_app = typer.Typer(no_args_is_help=True, help="MCP server commands")

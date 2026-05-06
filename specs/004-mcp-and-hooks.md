@@ -85,7 +85,41 @@ sync_now(direction="both", days=1)        # 一次性
 
 ## 2. Codex hook（notify）
 
-待研究 agent 报告完成后落地。
+研究：`docs/codex-notify-research.md`（由 sub-agent 调研 + 我直接读 `openai/codex` 源码相互印证）。关键事实：
+
+- Codex 提供 legacy `notify` 配置（`~/.codex/config.toml` 顶层 `notify = ["argv0", "argv1", ...]`）
+- 每个 agent turn 完成（`HookEvent::AfterAgent`）异步触发，**TUI 与 `codex exec` 都触发**
+- Codex 把 JSON payload 作为最后一个 argv 元素 append（kebab-case：`thread-id`, `turn-id`, `cwd`, `last-assistant-message` 等）
+- 纯 fire-and-forget：`tokio::process::Command::spawn()`，stdin/out/err 全置 null，**永不阻塞 Codex**
+- 现有 hooks crate 还提供更现代的 `PreToolUse / PostToolUse / SessionStart / UserPromptSubmit / Stop / PermissionRequest` 模型，但 legacy notify 已够用
+
+### 实现：`agent-resume install-hook --target codex`
+
+写入 `~/.codex/config.toml`：
+
+```toml
+notify = ["sh", "-c", "<existing>; <abs-python> -m agent_bridge.cli sync --direction codex-to-cc --days 1 >/dev/null 2>&1"]
+```
+
+`<existing>` 是用户原有 notify（如 afplay 提示音）——保留并通过 `;` 链入。两次 install 检测自身 cmd_str 已存在 → idempotent。修改前自动 `.bak`。
+
+实测验证（debug log 模式 → 干净模式）：
+
+```
+21:40:56 notify fired arg=
+sync: direction=codex-to-cc, days=1
+  ✓ codex→claude-code: rollout-2026-05-06T21-40-47-...jsonl → d3f9445c-...
+  ✓ codex→claude-code: rollout-2026-05-06T21-40-13-...jsonl → 8cb43d28-...
+  ✓ codex→claude-code: rollout-2026-05-06T21-39-50-...jsonl → 43650573-...
+summary: +3 translated
+```
+
+每个 `codex exec` 完成后，新 rollout jsonl 自动出现在 `~/.claude/projects/-Users-va7/` 里，CC `/resume` picker 立刻能看到（带 `[from codex]` 标题）。
+
+### 注意
+
+- `sh -c "<script>" "<extra-arg>"` 把 extra arg 赋给 `$0`（不是 `$1`）。所以 Codex 传的 JSON 进入子 shell 的 `$0`，被默认无视。安全。
+- 若用户后续清空或改写 `notify`，可重跑 `install-hook` 重新追加。
 
 ## 3. CC hook（已存在）
 

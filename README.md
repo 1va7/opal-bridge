@@ -1,5 +1,7 @@
 # agent-bridge
 
+> **v0.6.0** — title sync across CC↔Codex twins, no duplicate files on rename. See [CHANGELOG.md](CHANGELOG.md) for full version history.
+
 跨 agent 的 session 翻译与 resume 桥。
 
 ## 要解决的问题
@@ -47,36 +49,45 @@ codex exec resume <UUIDv7> "你的新指令"          # 翻成 Codex
 claude --resume <UUIDv4> -p "你的新指令"          # 翻成 CC（在原 cwd 下）
 ```
 
-## 当前能力（截至 spec 003 完成）
+## 当前能力（v0.6.0）
 
-✅ **双向**翻译 CC ↔ Codex（live resume 都验证通过）：
-- 6 核心工具：Bash / Read / Glob / Grep / WebSearch / 大部分 metadata
+✅ **双向翻译 + 自动镜像 + 共享标题** — 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)
+
+- **双向 CC ↔ Codex**：live `claude --resume` / `codex resume` 都验证通过
+- **共享标题**：在 CC 或 Codex 任一边重命名 session，对面 picker 自动跟进；不再产生重复文件
+- **自动镜像**：CC `Stop` hook + Codex `notify` hook，每段对话结束自动同步到对面；或用 `agent-resume watch` 守护进程
+- **MCP server**：`agent-resume mcp serve` 暴露 6 个工具给任意 MCP host（Claude Desktop / Cursor / Cline / …）
+- **6 核心工具映射**：Bash / Read / Glob / Grep / WebSearch / 大部分 metadata
 - **apply_patch 双向**：CC Edit/Write/MultiEdit ↔ Codex apply_patch grammar，多 op envelope 自动拆为多个 canonical ToolCall
 - **subagent inline**：自动扫 `<sess>/subagents/`，按 description 匹配后拼进主线
-- **compact_boundary**：双向（CC `compact_boundary` + isCompactSummary user ↔ canonical SummaryCompaction ↔ Codex `compacted` / `context_compaction`）
+- **compact_boundary 双向**：CC `compact_boundary + isCompactSummary user` ↔ canonical SummaryCompaction ↔ Codex `compacted / context_compaction`
 - **shell 命令模式识别**：Codex 端的 `cat -n / sed / head / tail / rg --files` 反向回 canonical Read/Glob，避免 round-trip 退化
 - **realpath + NFC**：CC encoded-cwd 与 `claude --resume` 行为一致
+- **正确的 picker 显示**：title / mtime / 助手回复都对齐原始 session 活动时间
 - attachment / skill_listing / nested_memory / file → developer message
 - thinking blocks 自动剥离（signature/encrypted_content 跨 harness 不兼容）
-- phase（commentary / final_answer）跨 CC line 推断
-- 18 个 pytest（含 round-trip）+ live `codex exec resume` + live `claude --resume` 验证
+- **24 pytest** + live `codex exec resume` + live `claude --resume` 验证
 
 ❌ 推迟（见 `specs/`）：
 - DAG 多 leaf 选择
 - TaskCreate 完整 stateful diff（目前 1:1 映射）
 - Plan mode / AskUserQuestion 完整翻译
 - Mode B / C fidelity（LLM 摘要）
-- MCP server
 - Hermes adapter
 - 与像素级蒸馏整合
 
 ## 文档
 
+- [CHANGELOG.md](CHANGELOG.md) — 版本历史与变更记录
 - `docs/ARCHITECTURE.md` — canonical IR 与 src/ 设计
 - `docs/tool-mapping.md` — 字段级映射规范（翻译器实现的金本位）
 - `docs/claude-code-harness.md` — CC 实证调研
 - `docs/codex-harness.md` — Codex 实证调研
+- `docs/codex-notify-research.md` — Codex notify hook 调研
 - `specs/001-translator-mvp.md` — MVP 范围与验收
+- `specs/002-completion.md` — apply_patch / compact_boundary / subagent
+- `specs/003-bidirectional.md` — Codex → CC 反向
+- `specs/004-mcp-and-hooks.md` — MCP server + 双向 hook
 - `data/fixture/PoC_REPORT.md` — 端到端 PoC 验证结果
 
 ## 与「像素级蒸馏」的关系
@@ -85,7 +96,10 @@ claude --resume <UUIDv4> -p "你的新指令"          # 翻成 CC（在原 cwd 
 
 ## 阶段路线图
 
-1. **MVP** ✅：CC → Codex 单向，6 核心工具，本仓 PoC fixture 自动化
-2. **002**：反向 Codex → CC、apply_patch 完整支持、compact_boundary、TaskCreate/Update 流转
-3. **003**：subagent inline/split 策略、Plan mode、Hermes adapter
-4. **MCP 化**：暴露 `resume(session_id, target)` 给所有 agent
+1. **v0.1.0 MVP** ✅：CC → Codex 单向，6 核心工具
+2. **v0.2.0 spec 002** ✅：apply_patch、compact_boundary、subagent inline、CLI list/smoke
+3. **v0.3.0 spec 003** ✅：反向 Codex → CC
+4. **v0.4.0 spec 004** ✅：sync/watch/双向 hook + MCP server
+5. **v0.5.0** ✅：picker 可见性、mtime、event_msg 镜像
+6. **v0.6.0** ✅：title sync、pair_map、dedupe，无重复
+7. **下一步**：Hermes adapter / 与像素级蒸馏整合 / Plan mode 完整支持

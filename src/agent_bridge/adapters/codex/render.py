@@ -236,7 +236,23 @@ def _render_moment(
         }
         if moment.phase:
             payload["phase"] = moment.phase
-        return [{"timestamp": ts, "type": "response_item", "payload": payload}]
+        # Mirror as event_msg.agent_message so codex's transcript view (which
+        # reads event_msg, not response_item) renders the assistant turns
+        # alongside user turns. Without this, the resume picker shows only
+        # user prompts and the conversation looks one-sided.
+        return [
+            {"timestamp": ts, "type": "response_item", "payload": payload},
+            {
+                "timestamp": ts,
+                "type": "event_msg",
+                "payload": {
+                    "type": "agent_message",
+                    "message": moment.text,
+                    "phase": moment.phase or "final_answer",
+                    "memory_citation": None,
+                },
+            },
+        ]
 
     if isinstance(moment, Thinking):
         # Already filtered in CC ingest, but defensive: drop.

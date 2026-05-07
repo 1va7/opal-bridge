@@ -167,8 +167,9 @@ def main(ctx: typer.Context) -> None:
 @app.command("sync")
 def sync_cmd(
     direction: str = typer.Option("both", "--direction", help="cc-to-codex | codex-to-cc | both"),
-    days: int = typer.Option(7, "--days", "-d", help="Only sessions modified within N days"),
-    max_bytes: int = typer.Option(25 * 1024 * 1024, "--max-bytes", help="Skip files larger than this"),
+    days: int = typer.Option(365, "--days", "-d", help="Only sessions modified within N days (default 365 = ~all)"),
+    max_bytes: int = typer.Option(100 * 1024 * 1024, "--max-bytes", help="Skip files larger than this (default 100MB)"),
+    include_active: bool = typer.Option(False, "--include-active", help="Include CC sessions currently in use (status=busy)"),
 ) -> None:
     """One-shot batch translate recent sessions in both/given direction(s).
 
@@ -176,7 +177,13 @@ def sync_cmd(
     sources are skipped and updated ones overwrite the same target file.
     """
     typer.echo(f"sync: direction={direction}, days={days}")
-    stats = sync_once(direction=direction, days=days, max_bytes=max_bytes, log=typer.echo)
+    stats = sync_once(
+        direction=direction,
+        days=days,
+        max_bytes=max_bytes,
+        include_active=include_active,
+        log=typer.echo,
+    )
     typer.echo("")
     typer.echo(
         f"summary: +{stats.translated} translated, "

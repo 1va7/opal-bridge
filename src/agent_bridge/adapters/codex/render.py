@@ -41,6 +41,7 @@ from agent_bridge.canonical.schema import (
 from .paths import CODEX_HOME, codex_path
 from .apply_patch import build_file_state, FileStateCache
 from .tool_map import render_tool_call, render_tool_result
+from . import manifest
 
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,7 @@ def render(
     _backdate_mtime(out_path, session)
     _append_thread_name(home, uuid, _make_thread_name(session))
     _upsert_state_db(home, uuid, out_path, session, model_provider)
+    manifest.record_write(out_path, uuid)
 
     resume_command = f'codex exec resume {uuid} "<your prompt>" -o /tmp/agent-bridge-resume.md'
 

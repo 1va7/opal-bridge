@@ -45,8 +45,9 @@ class SyncStats:
 def sync_once(
     *,
     direction: str = "both",  # "cc-to-codex" | "codex-to-cc" | "both"
-    days: int = 7,
-    max_bytes: int = 25 * 1024 * 1024,
+    days: int = 365,
+    max_bytes: int = 100 * 1024 * 1024,
+    include_active: bool = False,
     log: callable = print,
 ) -> SyncStats:
     """Translate recent sessions on the requested direction(s)."""
@@ -55,11 +56,11 @@ def sync_once(
 
     if direction in ("cc-to-codex", "both"):
         for path in _list_cc_sessions(cutoff):
-            _try_translate_one(path, "claude-code", "codex", max_bytes, stats, log)
+            _try_translate_one(path, "claude-code", "codex", max_bytes, stats, log, include_active)
 
     if direction in ("codex-to-cc", "both"):
         for path in _list_codex_sessions(cutoff):
-            _try_translate_one(path, "codex", "claude-code", max_bytes, stats, log)
+            _try_translate_one(path, "codex", "claude-code", max_bytes, stats, log, include_active)
 
     return stats
 
@@ -68,15 +69,22 @@ def watch_loop(
     *,
     interval: int = 30,
     direction: str = "both",
-    days: int = 7,
-    max_bytes: int = 25 * 1024 * 1024,
+    days: int = 365,
+    max_bytes: int = 100 * 1024 * 1024,
+    include_active: bool = False,
     log: callable = print,
 ) -> None:
     """Poll every `interval` seconds; never returns. Ctrl-C to stop."""
     log(f"agent-bridge watch: direction={direction}, interval={interval}s")
     while True:
         try:
-            stats = sync_once(direction=direction, days=days, max_bytes=max_bytes, log=lambda *_: None)
+            stats = sync_once(
+                direction=direction,
+                days=days,
+                max_bytes=max_bytes,
+                include_active=include_active,
+                log=lambda *_: None,
+            )
             if stats.translated > 0 or stats.failed > 0:
                 log(f"[{datetime.now().strftime('%H:%M:%S')}] +{stats.translated} translated, "
                     f"{stats.skipped_existing} unchanged, {stats.skipped_active} active, "
@@ -97,6 +105,7 @@ def _try_translate_one(
     max_bytes: int,
     stats: SyncStats,
     log: callable,
+    include_active: bool = False,
 ) -> None:
     try:
         size = source_path.stat().st_size
@@ -105,7 +114,11 @@ def _try_translate_one(
     if size > max_bytes:
         stats.skipped_too_big += 1
         return
-    if src_harness == "claude-code" and _cc_session_is_active(source_path):
+    if (
+        src_harness == "claude-code"
+        and not include_active
+        and _cc_session_is_active(source_path)
+    ):
         stats.skipped_active += 1
         return
 
@@ -294,13 +307,38 @@ def _list_codex_sessions(cutoff_mtime: float) -> list[Path]:
                 continue
         except OSError:
             continue
-        # Note: we used to filter agent-bridge files here, but that hid
-        # user renames / extensions of our translations. Sync_state
-        # fingerprint (incl. user thread_name) handles idempotency now;
-        # see _try_translate_one.
+        if _is_agent_bridge_codex(f) and not _user_touched_codex_translation(f):
+            # Our own untouched echo of a CC source — skip to avoid the
+            # round-trip pollution (every CC source spawning a codex
+            # echo AND a CC mirror of that codex echo).
+            continue
         out.append(f)
     out.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return out
+
+
+def _user_touched_codex_translation(codex_path: Path) -> bool:
+    """For an agent-bridge-written Codex jsonl, returns True iff the user has
+    either (a) appended turns (file size differs from our last write) or
+    (b) renamed the session via codex's `/name` command (user-set
+    thread_name appears in ~/.codex/session_index.jsonl).
+    """
+    from agent_bridge.adapters.codex import manifest
+    from agent_bridge.adapters.codex.ingest import _read_codex_thread_name
+
+    codex_id = _extract_codex_id_from_filename(codex_path.name)
+    if not codex_id:
+        return True  # can't identify; safer to translate
+    if _read_codex_thread_name(codex_id):
+        return True  # user renamed
+    rec = manifest.get(codex_id)
+    if rec is None:
+        return True  # we have no record — treat as user content
+    try:
+        cur_size = codex_path.stat().st_size
+    except OSError:
+        return False
+    return cur_size != rec.get("size")
 
 
 _AGENT_BRIDGE_MARKER = "agent-bridge"

@@ -387,6 +387,109 @@ def mcp_config_snippet_cmd() -> None:
     }, indent=2))
 
 
+@app.command("dedupe")
+def dedupe_cmd(
+    dry_run: bool = typer.Option(False, "--dry-run", help="List duplicates that would be removed"),
+) -> None:
+    """Remove duplicate CC translations of codex echoes.
+
+    Old behavior created a separate CC file (e.g. 00369f75) every time
+    you renamed a translated codex session. We now keep one canonical
+    pair per conversation and propagate the rename onto the original
+    twin's title. This command cleans up duplicates from the old behavior:
+
+      For each `[from codex] X` CC file:
+        - find its codex source via deterministic UUID hash
+        - if that codex source has a known CC twin (via pair_map), this
+          CC file is a duplicate of the twin → remove
+        - propagate the duplicate's title onto the twin first
+    """
+    from .pair_map import bootstrap_from_disk, get_cc_for_codex
+    from .canonical.ids import deterministic_uuid4
+    from .title_sync import (
+        _read_latest_cc_custom_title,
+        _append_cc_custom_title,
+    )
+
+    cc_root = Path.home() / ".claude" / "projects"
+    codex_root = Path.home() / ".codex" / "sessions"
+
+    # Bootstrap pair_map from existing files first
+    n_pairs = bootstrap_from_disk(cc_root, codex_root)
+    typer.echo(f"  bootstrapped {n_pairs} known CC↔Codex twin pair(s)")
+
+    # Build map: cc_uuid_we_would_create → original_cc_id
+    # For each codex file with originator=agent-bridge:
+    #   - look up cc_for_codex twin (the REAL cc source)
+    #   - compute deterministic_uuid4("codex:<codex_id>") = the duplicate cc_uuid we'd write
+    #   - if a CC file with that uuid exists, it's a duplicate of the twin
+    duplicate_cc_to_twin: dict[str, str] = {}
+    for f in codex_root.glob("**/rollout-*.jsonl"):
+        try:
+            first = f.open(encoding="utf-8", errors="replace").readline().strip()
+            ev = json.loads(first)
+            if ev.get("type") != "session_meta":
+                continue
+            payload = ev.get("payload", {}) or {}
+            if payload.get("originator") != "agent-bridge":
+                continue
+            codex_id = payload.get("id")
+            if not codex_id:
+                continue
+            twin_cc_id = get_cc_for_codex(codex_id)
+            if not twin_cc_id:
+                continue
+            duplicate_cc_id = deterministic_uuid4(f"codex:{codex_id}")
+            if duplicate_cc_id == twin_cc_id:
+                continue  # same file, not a duplicate
+            duplicate_cc_to_twin[duplicate_cc_id] = twin_cc_id
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    targets: list[tuple[Path, Path, str]] = []  # (duplicate_cc, twin_cc, title_to_propagate)
+    for proj in cc_root.iterdir() if cc_root.exists() else []:
+        if not proj.is_dir():
+            continue
+        for f in proj.glob("*.jsonl"):
+            cc_id = f.stem
+            twin_cc_id = duplicate_cc_to_twin.get(cc_id)
+            if not twin_cc_id:
+                continue
+            twin = None
+            for p in cc_root.iterdir():
+                if p.is_dir() and (p / f"{twin_cc_id}.jsonl").exists():
+                    twin = p / f"{twin_cc_id}.jsonl"
+                    break
+            if not twin:
+                continue
+            current_title = _read_latest_cc_custom_title(f) or ""
+            canonical = current_title
+            if canonical.startswith("[from codex] "):
+                canonical = canonical[len("[from codex] "):]
+            targets.append((f, twin, canonical))
+
+    if not targets:
+        typer.echo("nothing to dedupe.")
+        return
+    typer.echo(f"\nfound {len(targets)} duplicate(s):")
+    for dup, twin, title in targets:
+        typer.echo(f"  {dup.name[:12]}  →  {twin.name[:12]}  (title: {title[:60]})")
+    if dry_run:
+        typer.echo("\n(dry run — no files removed)")
+        return
+
+    for dup, twin, title in targets:
+        # Propagate canonical title to twin if it's been renamed and twin doesn't have it
+        twin_title = _read_latest_cc_custom_title(twin) or ""
+        if title and title != twin_title and not title.startswith("[from "):
+            _append_cc_custom_title(twin, twin.stem, title)
+        try:
+            dup.unlink()
+        except OSError as e:
+            typer.echo(f"  failed to remove {dup.name}: {e}", err=True)
+    typer.echo(f"\n✓ removed {len(targets)} duplicates and propagated titles")
+
+
 @app.command("clean")
 def clean_cmd(
     direction: str = typer.Option("both", "--direction", help="cc | codex | both"),

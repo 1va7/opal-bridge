@@ -54,6 +54,14 @@ def sync_once(
     stats = SyncStats()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
 
+    # Step 0: propagate any user renames between known twin pairs so that
+    # rename-only changes update the existing twin's title instead of
+    # spawning a duplicate file.
+    from agent_bridge import title_sync
+    propagated = title_sync.propagate_titles(log=lambda *_: None)
+    if propagated:
+        log(f"  ⇄ propagated {propagated} title rename(s) between twins")
+
     if direction in ("cc-to-codex", "both"):
         for path in _list_cc_sessions(cutoff):
             _try_translate_one(path, "claude-code", "codex", max_bytes, stats, log, include_active)
@@ -319,18 +327,17 @@ def _list_codex_sessions(cutoff_mtime: float) -> list[Path]:
 
 def _user_touched_codex_translation(codex_path: Path) -> bool:
     """For an agent-bridge-written Codex jsonl, returns True iff the user has
-    either (a) appended turns (file size differs from our last write) or
-    (b) renamed the session via codex's `/name` command (user-set
-    thread_name appears in ~/.codex/session_index.jsonl).
+    appended turns (file size differs from our last write).
+
+    Note: rename-only changes are NOT considered 'user-touched' here because
+    title_sync.propagate_titles() handles renames separately by updating the
+    twin's title in place — no need to spawn a duplicate file.
     """
     from agent_bridge.adapters.codex import manifest
-    from agent_bridge.adapters.codex.ingest import _read_codex_thread_name
 
     codex_id = _extract_codex_id_from_filename(codex_path.name)
     if not codex_id:
         return True  # can't identify; safer to translate
-    if _read_codex_thread_name(codex_id):
-        return True  # user renamed
     rec = manifest.get(codex_id)
     if rec is None:
         return True  # we have no record — treat as user content

@@ -177,6 +177,11 @@ def render(
     _append_thread_name(home, uuid, _make_thread_name(session))
     _upsert_state_db(home, uuid, out_path, session, model_provider)
     manifest.record_write(out_path, uuid)
+    # Record the CC↔Codex twin so renames propagate as title updates
+    # to the existing twin instead of producing a duplicate CC file.
+    if session.source_harness == "claude-code" and session.source_session_id:
+        from agent_bridge import pair_map
+        pair_map.record(cc_id=session.source_session_id, codex_id=uuid)
 
     resume_command = f'codex exec resume {uuid} "<your prompt>" -o /tmp/agent-bridge-resume.md'
 

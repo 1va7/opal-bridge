@@ -1,5 +1,7 @@
-# agent-bridge
+# opal-bridge
 
+> Part of [**OPAL**](https://github.com/1va7/opal) (**O**pen **P**ortable **A**ctivity **L**ayer) — the cross-agent CLI session translator subsystem.
+>
 > **v0.6.0** — title sync across CC↔Codex twins, no duplicate files on rename. See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 跨 agent 的 session 翻译与 resume 桥。

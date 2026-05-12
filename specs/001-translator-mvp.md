@@ -166,7 +166,7 @@ def translate(source_path, source_harness, target_harness, target_dir, **opts):
 
 ```bash
 agent-resume translate --from claude-code --to codex \
-  --session-id 0fdd7092-c42c-4263-a7be-0043fee5d776 \
+  --session-id aaaaaaaa-0000-4000-8000-000000000001 \
   [--target-dir ~/.codex/sessions]    # 默认就这个
 ```
 

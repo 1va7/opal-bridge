@@ -276,7 +276,7 @@ def infer_phase(assistant_blocks, position):
 CC：
 ```json
 {"type":"tool_use","name":"Write","id":"toolu_X","input":{
-  "file_path":"/Users/va7/Desktop/agent-bridge/src/foo.py",
+  "file_path":"/Users/alice/Desktop/agent-bridge/src/foo.py",
   "content":"import os\nprint(os.getcwd())\n"
 }}
 ```
@@ -480,7 +480,7 @@ CC：
 Codex：
 ```json
 {"type":"function_call","name":"exec_command","call_id":"toolu_X",
- "arguments":"{\"cmd\":\"npm test\",\"workdir\":\"/Users/va7/repo\",\"yield_time_ms\":1000,\"max_output_tokens\":12000}"}
+ "arguments":"{\"cmd\":\"npm test\",\"workdir\":\"/Users/alice/repo\",\"yield_time_ms\":1000,\"max_output_tokens\":12000}"}
 ```
 
 `arguments` 必须是 stringified JSON（Responses API 规范）。`workdir` 从 CC `cwd` 字段取。
@@ -1688,15 +1688,15 @@ Mode 选择影响：
 
 CC 输入：
 ```jsonl
-{"uuid":"u1","parentUuid":null,"type":"user","message":{"role":"user","content":"What is 2+2?"},"sessionId":"cc-sess","timestamp":"2026-05-06T09:00:00.000Z","cwd":"/Users/va7","version":"2.1.131","userType":"external","entrypoint":"cli","gitBranch":"HEAD"}
+{"uuid":"u1","parentUuid":null,"type":"user","message":{"role":"user","content":"What is 2+2?"},"sessionId":"cc-sess","timestamp":"2026-05-06T09:00:00.000Z","cwd":"/Users/alice","version":"2.1.131","userType":"external","entrypoint":"cli","gitBranch":"HEAD"}
 {"uuid":"u2","parentUuid":"u1","type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-6","role":"assistant","content":[{"type":"text","text":"4"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},"sessionId":"cc-sess","timestamp":"2026-05-06T09:00:01.000Z",...}
 {"uuid":"u3","parentUuid":"u2","type":"user","message":{"role":"user","content":"And 3+3?"},"sessionId":"cc-sess","timestamp":"2026-05-06T09:00:02.000Z",...}
 ```
 
 Codex 输出（保存为 `~/.codex/sessions/2026/05/06/rollout-2026-05-06T09-00-00-019df900-...jsonl`）：
 ```jsonl
-{"timestamp":"2026-05-06T09:00:00.000Z","type":"session_meta","payload":{"id":"019df900-0000-7000-9000-000000000001","timestamp":"2026-05-06T09:00:00.000Z","cwd":"/Users/va7","originator":"agent-bridge","cli_version":"0.1.0","source":{"custom":"agent-bridge"}}}
-{"timestamp":"2026-05-06T09:00:00.001Z","type":"turn_context","payload":{"turn_id":"019df900-0000-7000-9000-000000000002","cwd":"/Users/va7","current_date":"2026-05-06","timezone":"Asia/Shanghai","approval_policy":"on-request","sandbox_policy":{"type":"workspace-write"},"model":"gpt-5","summary":"none"}}
+{"timestamp":"2026-05-06T09:00:00.000Z","type":"session_meta","payload":{"id":"019df900-0000-7000-9000-000000000001","timestamp":"2026-05-06T09:00:00.000Z","cwd":"/Users/alice","originator":"agent-bridge","cli_version":"0.1.0","source":{"custom":"agent-bridge"}}}
+{"timestamp":"2026-05-06T09:00:00.001Z","type":"turn_context","payload":{"turn_id":"019df900-0000-7000-9000-000000000002","cwd":"/Users/alice","current_date":"2026-05-06","timezone":"Asia/Shanghai","approval_policy":"on-request","sandbox_policy":{"type":"workspace-write"},"model":"gpt-5","summary":"none"}}
 {"timestamp":"2026-05-06T09:00:00.002Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is 2+2?"}]}}
 {"timestamp":"2026-05-06T09:00:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"4"}],"phase":"final_answer"}}
 {"timestamp":"2026-05-06T09:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"And 3+3?"}]}}

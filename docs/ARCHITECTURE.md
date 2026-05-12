@@ -90,7 +90,7 @@
   "source_harness": "claude-code|codex|hermes|other",
   "source_session_id": "<原 ID>",          // 原 harness 中的 ID（CC 是 v4 UUID，Codex 是 v7 UUID）
   "source_session_path": "<原文件绝对路径>",
-  "cwd": "/Users/va7/Desktop/foo",
+  "cwd": "/Users/alice/Desktop/foo",
   "git": {
     "branch": "main",
     "commit": "abc123...",                  // 可空
@@ -117,7 +117,7 @@
     {"name": "...", "tools": ["...", "..."]}
   ],
   "memory_files": [                           // CLAUDE.md / AGENTS.md 之类的
-    {"path": "/Users/va7/.claude/CLAUDE.md", "scope": "user", "content_md": "<内容>"}
+    {"path": "/Users/alice/.claude/CLAUDE.md", "scope": "user", "content_md": "<内容>"}
   ],
   "stats": {
     "tokens_in": 0,
@@ -756,7 +756,7 @@ def test_live_codex_resume(monkeypatch):
 
 **MVP 不做**。但架构必须为此预留接口。
 
-### 9.1 像素级蒸馏的现有结构（来自 `/Users/va7/Desktop/0423 像素级蒸馏/`）
+### 9.1 像素级蒸馏的现有结构（来自 `/Users/alice/Desktop/0423 像素级蒸馏/`）
 
 ```
 src/

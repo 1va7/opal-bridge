@@ -20,7 +20,7 @@
 3. **不止一种 line type**：除了 `user` / `assistant` 还有 `system`（含子类型）、`attachment`（10+ 子类型）、`file-history-snapshot`、`permission-mode`、`queue-operation`、`last-prompt`、`ai-title`、`custom-title`、`agent-name`、（旧版本）`summary`、`compact_boundary`（system 子类型）。
 4. **Compaction 边界**：`type=system / subtype=compact_boundary` 是关键，后面紧跟一条 `isCompactSummary: true` 的伪造 user 消息。翻译器要决定是把 boundary **截断重启**还是**保留摘要**。
 5. **Subagent**：现代 CC（2.1.x）用 `Agent` 工具产生子 agent，子 agent 的完整 transcript 放在 `<session-id>/subagents/agent-<id>.jsonl`，**主 session 里只保留 `Agent` 工具的最终 `tool_result`**（一条文本）。同步 vs 异步的 result 形式不同。
-6. **`sessions-index.json` 不可信**：本仓库里 `~/.claude/projects/-Users-va7/` 这个最频繁使用的项目里**根本没有这个文件**；只有几个不再使用的旧项目目录里残留 stale index。CC 的官方真相源是「目录扫描 + 解析每个 jsonl 头/尾」（见 `xRH` / `Wb5` / `Gb5` 函数）[bin]。
+6. **`sessions-index.json` 不可信**：本仓库里 `~/.claude/projects/-Users-alice/` 这个最频繁使用的项目里**根本没有这个文件**；只有几个不再使用的旧项目目录里残留 stale index。CC 的官方真相源是「目录扫描 + 解析每个 jsonl 头/尾」（见 `xRH` / `Wb5` / `Gb5` 函数）[bin]。
 7. **System prompt 不写入 jsonl**：每次 turn 由 harness 实时拼接（CLAUDE.md 内容 + currentDate + skill listing + 工具描述），通过 `attachment` line 把 `nested_memory` / `skill_listing` / `task_reminder` / `command_permissions` 等动态片段记录在用户回合上下文里。**翻译器必须模拟拼接，否则生成的会话回放时模型会走偏。**
 8. **真正的工具集合**比系统提示给我们看到的更窄，但也有几个隐藏成员：jsonl 里实际出现过 `Glob` 和 `Grep`（系统提示没列），而 `MultiEdit` / `TodoWrite` 已经被废弃为 `TaskCreate / TaskUpdate / ...` 体系（见 §3）。
 9. **Permission mode 是会话级状态**：单独写在一行 `type=permission-mode`，不在 user/assistant 消息里。翻译时不能丢弃。
@@ -32,7 +32,7 @@
 
 ### 1.1 目录树
 
-实际形态（[disk] 来自 `ls -la ~/.claude/projects/-Users-va7/3811efca-3110-4f85-b685-b980a0e29d4c*`）：
+实际形态（[disk] 来自 `ls -la ~/.claude/projects/-Users-alice/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa*`）：
 
 ```
 ~/.claude/
@@ -45,9 +45,9 @@
 ├── plugins/                                    # 安装的 plugin/skill marketplace
 ├── skills/                                     # 全局 skill
 ├── projects/
-│   ├── -Users-va7/                             # 编码后的 cwd
-│   │   ├── 3811efca-...........jsonl           # 一个 session = 一个文件
-│   │   ├── 3811efca-............/              # 同名子目录（仅 v2.1.x 起出现）
+│   ├── -Users-alice/                             # 编码后的 cwd
+│   │   ├── aaaaaaaa-...........jsonl           # 一个 session = 一个文件
+│   │   ├── aaaaaaaa-............/              # 同名子目录（仅 v2.1.x 起出现）
 │   │   │   ├── subagents/                      # 该 session 启动的子 agent transcript
 │   │   │   │   ├── agent-a01f7a96030eca02a.jsonl
 │   │   │   │   └── agent-a01f7a96030eca02a.meta.json   # {"agentType":"general-purpose","description":"..."}
@@ -57,7 +57,7 @@
 │   │   ├── memory/                             # 当前项目的二级 memory（CLAUDE.md 引用）
 │   │   │   └── *.md
 │   │   └── （历史项目里还可能有）sessions-index.json   # 已废弃，不要依赖
-│   └── -Users-va7-Desktop-0205-----/
+│   └── -Users-alice-Desktop-0205-----/
 │       ├── sessions-index.json                 # 老版本残留
 │       └── 1877e4d3-3a8c-4e99-9e8a-714b288228e5/
 │           └── subagents/
@@ -84,7 +84,7 @@
 └── cache/, paste-cache/                        # 各种缓存
 ```
 
-`/private/tmp/claude-501/-Users-va7/<session-id>/tasks/*.output` 还存着 background bash command 的实时 stdout，由 `TaskOutput` 工具读取。
+`/private/tmp/claude-501/-Users-alice/<session-id>/tasks/*.output` 还存着 background bash command 的实时 stdout，由 `TaskOutput` 工具读取。
 
 ### 1.2 项目目录名编码（cwd → encoded path）
 
@@ -99,10 +99,10 @@ function PY(cwd) {
 ```
 
 要点：
-- 把 **所有非 ASCII 字母数字字符**（包括 `/`、空格、Unicode）替换为 `-`，**不做转义**，因此 `/Users/va7/Desktop/小红书图文裂变` → `-Users-va7-Desktop-----`（4 个汉字塌成 4 个 `-`，再加上前面的 3 个 `-`）。这就是为什么本机能看到 `-Users-va7-Desktop-----` 这种诡异目录名。
-- **冲突可能性**：两个名字不同但在 `[^a-zA-Z0-9]` 之外没有差别的目录会撞名（如 `Desktop/小红书图文裂变` 和 `Desktop/影视台风` 都成 `-Users-va7-Desktop-----`），但在长度 ≤ 200 的情况下 CC **不会附加 hash**，因此生产环境真的存在 stale collision；查资料时要拿 jsonl 内每条 `cwd` 字段为准。
+- 把 **所有非 ASCII 字母数字字符**（包括 `/`、空格、Unicode）替换为 `-`，**不做转义**，因此 `/Users/alice/Desktop/小红书图文裂变` → `-Users-alice-Desktop-----`（4 个汉字塌成 4 个 `-`，再加上前面的 3 个 `-`）。这就是为什么本机能看到 `-Users-alice-Desktop-----` 这种诡异目录名。
+- **冲突可能性**：两个名字不同但在 `[^a-zA-Z0-9]` 之外没有差别的目录会撞名（如 `Desktop/小红书图文裂变` 和 `Desktop/影视台风` 都成 `-Users-alice-Desktop-----`），但在长度 ≤ 200 的情况下 CC **不会附加 hash**，因此生产环境真的存在 stale collision；查资料时要拿 jsonl 内每条 `cwd` 字段为准。
 - 长度 > 200 时才追加 base36 hash；hash 函数是私有 32-bit hash（看上去不是 djb2，但算法等价于一个 stable hash）。
-- 解码一定不可逆：从目录名 `-Users-va7-Desktop-----` 无法还原 `小红书图文裂变`，必须打开 jsonl 看 `cwd` 字段。
+- 解码一定不可逆：从目录名 `-Users-alice-Desktop-----` 无法还原 `小红书图文裂变`，必须打开 jsonl 看 `cwd` 字段。
 - 路径会先 `realpath` + `String.normalize("NFC")`，所以 macOS 上的 NFD 形式不会单独出现。
 
 ### 1.3 sessionId 与文件名
@@ -135,8 +135,8 @@ function PY(cwd) {
 ### 1.5 关于 `sessions-index.json` ——为什么不可信
 
 观察到的事实：
-- 频繁活跃的 `-Users-va7/` 目录里 **完全没有 sessions-index.json**[disk]。
-- 几个早期项目（`-Users-va7-Desktop-clawdbot`, `-Users-va7-Desktop-0205-----`）里有 `sessions-index.json`，但内容只反映 2026-01 ~ 02 的 session，再之后写入的 jsonl 完全没被索引[disk]。
+- 频繁活跃的 `-Users-alice/` 目录里 **完全没有 sessions-index.json**[disk]。
+- 几个早期项目（`-Users-alice-Desktop-clawdbot`, `-Users-alice-Desktop-0205-----`）里有 `sessions-index.json`，但内容只反映 2026-01 ~ 02 的 session，再之后写入的 jsonl 完全没被索引[disk]。
 
 [bin] 里的真相：CC 当前的 session 列表枚举走的是 `Gb5() / xRH()`：直接 `readdir(<project-dir>)`，把 `*.jsonl` 全列出来；用 `head/tail KX=64KB` 读每个文件的头尾来恢复 metadata（`cwd / gitBranch / firstPrompt / customTitle / summary`）。索引文件根本不在调用链里。
 
@@ -147,7 +147,7 @@ function PY(cwd) {
 [disk] 字段：
 
 ```json
-{"display":"prompt text","pastedContents":{},"timestamp":1768538017564,"project":"/Users/va7/Desktop/影视台风","sessionId":"32289b9e-c8d2-45c4-b0de-b9c2878d5947"}
+{"display":"prompt text","pastedContents":{},"timestamp":1768538017564,"project":"/Users/alice/Desktop/影视台风","sessionId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}
 ```
 
 - 一行一条 prompt，记录所有项目的输入历史。
@@ -162,8 +162,8 @@ function PY(cwd) {
 ```json
 {
   "pid": 41672,
-  "sessionId": "3811efca-3110-4f85-b685-b980a0e29d4c",
-  "cwd": "/Users/va7",
+  "sessionId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "cwd": "/Users/alice",
   "startedAt": 1778055179185,
   "procStart": "Wed May  6 08:12:27 2026",
   "version": "2.1.131",
@@ -211,8 +211,8 @@ function PY(cwd) {
   "isSidechain": false,                                  // true 表示这是 subagent 的内部对话
   "type": "...",
   "timestamp": "2026-05-06T08:14:53.390Z",              // ISO 8601
-  "sessionId": "3811efca-3110-4f85-b685-b980a0e29d4c",
-  "cwd": "/Users/va7",
+  "sessionId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "cwd": "/Users/alice",
   "gitBranch": "HEAD",
   "version": "2.1.131",                                  // 写这条记录的 CC 版本
   "userType": "external",                                // external | internal
@@ -241,8 +241,8 @@ function PY(cwd) {
   "permissionMode": "bypassPermissions",
   "userType": "external",
   "entrypoint": "cli",
-  "cwd": "/Users/va7",
-  "sessionId": "3811efca-3110-4f85-b685-b980a0e29d4c",
+  "cwd": "/Users/alice",
+  "sessionId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "version": "2.1.131",
   "gitBranch": "HEAD"
 }
@@ -344,7 +344,7 @@ function PY(cwd) {
   "timestamp":"...",
   "userType":"external",
   "entrypoint":"cli",
-  "cwd":"/Users/va7",
+  "cwd":"/Users/alice",
   "sessionId":"...",
   "version":"2.1.131",
   "gitBranch":"HEAD",
@@ -485,7 +485,7 @@ Stop hook 执行结果（来自 `~/.claude/settings.json` 的 `Stop` 事件）�
   "snapshot":{
     "messageId":"3eb754ac-...",
     "trackedFileBackups":{
-      "/Users/va7/foo.py":{"hash":"0ed4d0613fe19259","version":"v3"},
+      "/Users/alice/foo.py":{"hash":"0ed4d0613fe19259","version":"v3"},
       ...
     },
     "timestamp":"2026-05-06T08:14:47.239Z"
@@ -690,7 +690,7 @@ def build_conversation(project_dir):
 或带状态：
 
 ```json
-{"type":"tool_result","content":"<persisted-output>\nOutput too large (567KB). Full output saved to: /Users/va7/.../tool-results/bo3xjf1s8.txt\n\nPreview (first 2KB):\n   <截断>\n...[TRUNC]\n</persisted-output>"}
+{"type":"tool_result","content":"<persisted-output>\nOutput too large (567KB). Full output saved to: /Users/alice/.../tool-results/bo3xjf1s8.txt\n\nPreview (first 2KB):\n   <截断>\n...[TRUNC]\n</persisted-output>"}
 ```
 
 **副作用**：本机 shell 执行；macOS 上默认会被 sandbox-exec 包裹（限制网络/写路径），除非 `dangerouslyDisableSandbox`。
@@ -1401,7 +1401,7 @@ The following skills are available for use with the Skill tool:
 {
   "session_id": "...",
   "transcript_path": "/path/to/<sessionId>.jsonl",
-  "cwd": "/Users/va7",
+  "cwd": "/Users/alice",
   "permission_mode": "default",
   "hook_event_name": "PreToolUse|PostToolUse|PreCompact|PostCompact|Stop|SubagentStop|Notification|SessionStart|UserPromptSubmit",
   // event-specific 字段：
@@ -1544,7 +1544,7 @@ Hook 在 jsonl 里的痕迹：
 
 // ---------- ATTACHMENT (nested_memory) ----------
 { "type":"attachment", ...,
-  "attachment":{ "type":"nested_memory", "path":"/Users/va7/.claude/CLAUDE.md",
+  "attachment":{ "type":"nested_memory", "path":"/Users/alice/.claude/CLAUDE.md",
                   "content":{"path":"...","type":"User","content":"<full md>"} } }
 
 // ---------- ATTACHMENT (file) ----------
@@ -1595,7 +1595,7 @@ Hook 在 jsonl 里的痕迹：
 1. **Stage 1 — 单文件 → 通用 IR**：忽略 sidechain，截断到最近一个 compact_boundary，保留所有 user / assistant + tool_use + tool_result + 关键 attachment（nested_memory、file、invoked_skills、queued_command）。
 2. **Stage 2 — 工具映射**：维护一张 `cc_tool → codex_equivalent` 的表（见 §7）。Bash/Edit/Write/Read/Glob/Grep 用最小损耗映射；Skill/Agent/Task/Plan/Cron 必要时降级。
 3. **Stage 3 — 系统提示重建**：在新 harness 里重建一份等价 system prompt（CC 模板 + memory + tool schema + skill listing），不要试图照抄 jsonl。
-4. **Stage 4 — 落盘**：写出 Codex 的目标 jsonl 格式（参见 `/Users/va7/Desktop/agent-bridge/docs/codex-harness.md`，由另一个 agent 产出）。
+4. **Stage 4 — 落盘**：写出 Codex 的目标 jsonl 格式（参见 `/Users/alice/Desktop/agent-bridge/docs/codex-harness.md`，由另一个 agent 产出）。
 5. **Stage 5 — 反向回译**：保留 metadata（cwd、gitBranch、permissionMode、agentId、原 tool_use_id），方便 Codex → CC 回译时把信息塞回去。
 
 **最关键的两条不变量**：

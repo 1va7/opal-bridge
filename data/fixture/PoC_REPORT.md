@@ -2,7 +2,7 @@
 
 Date: 2026-05-06
 Codex: 0.128.0
-CC fixture origin: `~/.claude/projects/-Users-va7/0fdd7092-c42c-4263-a7be-0043fee5d776.jsonl` (CC v2.1.107)
+CC fixture origin: `~/.claude/projects/-Users-alice/aaaaaaaa-0000-4000-8000-000000000001.jsonl` (CC v2.1.107)
 
 ## 1. Fixture chosen
 
@@ -12,7 +12,7 @@ CC fixture origin: `~/.claude/projects/-Users-va7/0fdd7092-c42c-4263-a7be-0043fe
 - **Non-dialog noise**: `permission-mode` (×2), `file-history-snapshot`, `attachment / skill_listing`, `last-prompt`. All but `attachment` were dropped per `tool-mapping.md` §1.2.
 
 Translated to `data/fixture/codex-output.jsonl` — 8 lines:
-1. `session_meta` (id `019f0000-1234-7000-9000-000000000001`, source `{"custom":"agent-bridge"}`, originator `agent-bridge`, cli_version `0.1.0`, cwd `/Users/va7`)
+1. `session_meta` (id `019f0000-1234-7000-9000-000000000001`, source `{"custom":"agent-bridge"}`, originator `agent-bridge`, cli_version `0.1.0`, cwd `/Users/alice`)
 2. `turn_context` (`approval_policy: "never"`, `sandbox_policy: {"type":"danger-full-access"}`, `model: "gpt-5.5"`, `summary: "none"`)
 3. user `message` (text "claude instal")
 4. developer `message` (skill_listing summary)
@@ -32,7 +32,7 @@ Translated to `data/fixture/codex-output.jsonl` — 8 lines:
 
 ## 3. Verification result
 
-Command (run from `/Users/va7`):
+Command (run from `/Users/alice`):
 
 ```
 codex exec resume 019f0000-1234-7000-9000-000000000001 \
@@ -61,7 +61,7 @@ PoC OK
 
 After resume, Codex appended 11 events to the same jsonl (turn_started, model output, token_count, task_complete, etc.) — file went from 8 lines to 19 lines. **The append-in-place behavior matches `codex-harness.md` §2.6 / §8.3.**
 
-One unrelated stderr line: `failed to load skill /Users/va7/.codex/skills/amazon-rufus/SKILL.md: invalid YAML at line 2 column 224` — a pre-existing user-side skill issue, not caused by our fixture.
+One unrelated stderr line: `failed to load skill /Users/alice/.codex/skills/example-skill/SKILL.md: invalid YAML at line 2 column 224` — a pre-existing user-side skill issue, not caused by our fixture.
 
 ## 4. Mapping doc errors / gaps discovered
 

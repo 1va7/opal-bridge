@@ -58,7 +58,7 @@ Codex CLI（仓库 `openai/codex`）是 OpenAI 官方维护的开源终端编码
 
 Codex 支持的模型枚举见：
 - `codex-rs/protocol/src/openai_models.rs:43` — `ReasoningEffort` 枚举：`None`, `Minimal`, `Low`, `Medium`(默认), `High`, `XHigh`。
-- `~/.codex/config.toml` 可见于本机：`model = "gpt-5.5"`、`model_reasoning_effort = "xhigh"`、`model_provider = "metana"`。
+- `~/.codex/config.toml` 可见于本机：`model = "gpt-5.5"`、`model_reasoning_effort = "xhigh"`、`model_provider = "openai"`。
 - 模型迁移由 `[notice.model_migrations]` 配置（如 `"gpt-5.3-codex" = "gpt-5.4"`，强制升级提示）。
 - 命令行覆写：`-m, --model <MODEL>` 或 `-c model=...`。
 
@@ -67,22 +67,22 @@ Codex 支持的模型枚举见：
 主配置位于 `$CODEX_HOME/config.toml`，`CODEX_HOME` 默认 `~/.codex`。可覆写：
 
 ```toml
-model_provider = "metana"
+model_provider = "openai"
 model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 disable_response_storage = true
 preferred_auth_method = "apikey"
 notify = ["sh", "-c", "afplay /System/Library/Sounds/Glass.aiff >/dev/null 2>&1"]
 
-[model_providers.metana]
-name = "metana"
-base_url = "https://api.metana.ai/v1"
+[model_providers.openai]
+name = "openai"
+base_url = "https://api.openai.com/v1"
 wire_api = "responses"
 
 [notice.model_migrations]
 "gpt-5.3-codex" = "gpt-5.4"
 
-[projects."/Users/va7"]
+[projects."/Users/alice"]
 trust_level = "trusted"
 ```
 
@@ -281,11 +281,11 @@ pub struct SessionMetaLine {
 {
   "id": "019dd8e4-15dd-7143-95e8-219014341717",
   "timestamp": "2026-04-29T10:58:39.732Z",
-  "cwd": "/Users/va7",
+  "cwd": "/Users/alice",
   "originator": "codex-tui",
   "cli_version": "0.125.0",
   "source": "cli",
-  "model_provider": "metana"
+  "model_provider": "openai"
 }
 ```
 
@@ -349,7 +349,7 @@ pub struct TurnContextItem {
 ```json
 {
   "turn_id":"019df7b2-1df3-7e01-b2f9-f9283453cd1c",
-  "cwd":"/Users/va7",
+  "cwd":"/Users/alice",
   "current_date":"2026-05-05",
   "timezone":"Asia/Shanghai",
   "approval_policy":"never",
@@ -509,7 +509,7 @@ Assistant final answer：
 {"timestamp":"...","type":"response_item","payload":{
   "type":"function_call",
   "name":"exec_command",
-  "arguments":"{\"cmd\": \"sed -n '1,220p' /Users/va7/.codex/skills/web-access/SKILL.md\", \"workdir\": \"/Users/va7\", \"yield_time_ms\": 1000, \"max_output_tokens\": 12000}",
+  "arguments":"{\"cmd\": \"sed -n '1,220p' /Users/alice/.codex/skills/web-access/SKILL.md\", \"workdir\": \"/Users/alice\", \"yield_time_ms\": 1000, \"max_output_tokens\": 12000}",
   "call_id":"call_ahWfyuXHFSa3HIH5LZqHkv5B"
 }}
 ```
@@ -689,7 +689,7 @@ pub enum FileChange {
  "turn_id":"019df825-eae9-77a2-9130-d2352a24993b",
  "stdout":"Success. Updated the following files:\nA standard_solution_assets/generate_diagrams.js\n",
  "stderr":"","success":true,
- "changes":{"/Users/va7/standard_solution_assets/generate_diagrams.js":
+ "changes":{"/Users/alice/standard_solution_assets/generate_diagrams.js":
             {"type":"add","content":"const fs = require(\"fs\");\n..."}},
  "status":"completed"}
 ```
@@ -1119,7 +1119,7 @@ argv 数组（`shell`，未在本机会话出现，举例自 source）：
 unified `exec_command`（实测）：
 ```json
 {"type":"function_call","name":"exec_command","call_id":"...",
- "arguments":"{\"cmd\":\"find /Users/va7/.codex/skills -maxdepth 3 -name SKILL.md -print\",\"workdir\":\"/Users/va7\",\"yield_time_ms\":1000,\"max_output_tokens\":8000}"}
+ "arguments":"{\"cmd\":\"find /Users/alice/.codex/skills -maxdepth 3 -name SKILL.md -print\",\"workdir\":\"/Users/alice\",\"yield_time_ms\":1000,\"max_output_tokens\":8000}"}
 ```
 
 write_stdin（实测）：
@@ -1469,8 +1469,8 @@ Codex 的 `token_count.info.total_token_usage` (`input/cached_input/output/reaso
 下面是一份手工拼装、Codex 0.128.0 能 `resume` 接受的最小三行 jsonl。把它放在 `~/.codex/sessions/2026/05/06/rollout-2026-05-06T17-00-00-019df900-0000-7000-9000-000000000001.jsonl`，然后 `codex resume --include-non-interactive 019df900-0000-7000-9000-000000000001`：
 
 ```json
-{"timestamp":"2026-05-06T09:00:00.000Z","type":"session_meta","payload":{"id":"019df900-0000-7000-9000-000000000001","timestamp":"2026-05-06T09:00:00.000Z","cwd":"/Users/va7","originator":"agent-bridge","cli_version":"0.0.1","source":{"custom":"agent-bridge"},"model_provider":"metana","base_instructions":{"text":"You are Codex (translated from Claude Code)."}}}
-{"timestamp":"2026-05-06T09:00:00.001Z","type":"turn_context","payload":{"turn_id":"019df900-0000-7000-9000-000000000002","cwd":"/Users/va7","current_date":"2026-05-06","timezone":"Asia/Shanghai","approval_policy":"never","sandbox_policy":{"type":"danger-full-access"},"model":"gpt-5.5","summary":"none","truncation_policy":{"mode":"tokens","limit":10000}}}
+{"timestamp":"2026-05-06T09:00:00.000Z","type":"session_meta","payload":{"id":"019df900-0000-7000-9000-000000000001","timestamp":"2026-05-06T09:00:00.000Z","cwd":"/Users/alice","originator":"agent-bridge","cli_version":"0.0.1","source":{"custom":"agent-bridge"},"model_provider":"openai","base_instructions":{"text":"You are Codex (translated from Claude Code)."}}}
+{"timestamp":"2026-05-06T09:00:00.001Z","type":"turn_context","payload":{"turn_id":"019df900-0000-7000-9000-000000000002","cwd":"/Users/alice","current_date":"2026-05-06","timezone":"Asia/Shanghai","approval_policy":"never","sandbox_policy":{"type":"danger-full-access"},"model":"gpt-5.5","summary":"none","truncation_policy":{"mode":"tokens","limit":10000}}}
 {"timestamp":"2026-05-06T09:00:00.002Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue the work from earlier."}]}}
 ```
 

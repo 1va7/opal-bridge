@@ -330,7 +330,7 @@ The shell `sh -c` form has a footgun: with `notify = ["sh", "-c", "agent-bridge 
 Use an absolute path:
 
 ```toml
-notify = ["/Users/va7/.cargo/bin/agent-bridge", "sync", "--from-codex-notify"]
+notify = ["/Users/alice/.cargo/bin/agent-bridge", "sync", "--from-codex-notify"]
 ```
 
 (or wherever the install prefix is — `agent-resume install-hook --target codex` should detect or accept the binary path). Codex inherits its own `PATH`, which on macOS launched from Terminal/iTerm/etc. will include `~/.cargo/bin` etc., but launched from Spotlight or LaunchAgents may not.
@@ -420,7 +420,7 @@ These were not fully resolved from source/docs — flag for follow-up if they ma
 
 4. **Session prefix / session-startup-prewarm interaction.** Codex has a `session_startup_prewarm.rs` and pre-warm threads. These execute before the first user turn; I did not verify they don't fire spurious `AfterAgent` events. Likely fine since the dispatch is gated on `!needs_follow_up` after a real model completion.
 
-5. **TOML serializer round-trip when modifying via toml-edit.** Our install-hook will need to read+modify+write `~/.codex/config.toml` while preserving comments and other sections. The user's existing config has `[model_providers.metana]`, `[notice.model_migrations]`, `[tui.model_availability_nux]`, `[projects."/Users/va7"]` sections — toml-edit should handle all of these but verify before shipping.
+5. **TOML serializer round-trip when modifying via toml-edit.** Our install-hook will need to read+modify+write `~/.codex/config.toml` while preserving comments and other sections. The user's existing config has `[model_providers.openai]`, `[notice.model_migrations]`, `[tui.model_availability_nux]`, `[projects."/Users/alice"]` sections — toml-edit should handle all of these but verify before shipping.
 
 6. **Behavior when `notify` array contains non-string TOML values.** Serde will reject (`Vec<String>` is strict). Any malformed array silently disables the feature with no startup warning surfaced to the user — `Hooks::new` just produces an empty `after_agent` vector. Our installer should validate before writing.
 

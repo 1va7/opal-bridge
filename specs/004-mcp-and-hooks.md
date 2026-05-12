@@ -114,7 +114,7 @@ sync: direction=codex-to-cc, days=1
 summary: +3 translated
 ```
 
-每个 `codex exec` 完成后，新 rollout jsonl 自动出现在 `~/.claude/projects/-Users-va7/` 里，CC `/resume` picker 立刻能看到（带 `[from codex]` 标题）。
+每个 `codex exec` 完成后，新 rollout jsonl 自动出现在 `~/.claude/projects/-Users-alice/` 里，CC `/resume` picker 立刻能看到（带 `[from codex]` 标题）。
 
 ### 注意
 

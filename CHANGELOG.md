@@ -41,7 +41,7 @@ Each version maps to a git tag (`v0.1.0` … `v0.6.0`).
 
 ### Fixed
 - **Codex picker invisibility** (multiple root causes, fixed in sequence):
-  - Hardcoded `model_provider: "openai"` was filtered by `ProviderMatcher` against the user's configured provider (e.g., `metana`). Now omitted; picker falls back to `matches_default_provider`.
+  - Hardcoded `model_provider: "openai"` was filtered by `ProviderMatcher` against the user's configured provider (e.g., `openai`). Now omitted; picker falls back to `matches_default_provider`.
   - `source: {"custom":"agent-bridge"}` not in `INTERACTIVE_SESSION_SOURCES` whitelist (`Cli, VsCode, Custom("atlas"), Custom("chatgpt")`). Even `--include-non-interactive` doesn't open this up. Switched to `source: "cli"`; distinction preserved via `originator: "agent-bridge"`.
   - Codex picker reads `~/.codex/state_5.sqlite` `threads` table, not the filesystem. Render now `INSERT OR REPLACE`s a row so picker actually lists our jsonls.
   - `metadata.title` extractor reads `event_msg.user_message` only — `response_item.message` is a no-op for title extraction. Render now emits both response_item AND paired event_msg for every UserText moment.

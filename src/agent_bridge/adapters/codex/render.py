@@ -579,11 +579,20 @@ def _upsert_state_db(
     if not db.exists():
         return  # Codex hasn't initialized; let it create on next start
 
-    title = _make_thread_name(session)
-    # If user has set their own title via codex (`/name`) preserve it.
-    existing_user_title = _peek_existing_user_title(db, thread_id)
-    if existing_user_title:
-        title = existing_user_title
+    generated_title = _make_thread_name(session)
+    title = generated_title
+    # Codex's picker/search primarily uses SQLite, while `/name` writes the
+    # durable user label to session_index.jsonl. Prefer that index label when
+    # force re-rendering so a stale/generated DB title cannot hide the session.
+    index_user_title = _read_codex_user_thread_name(codex_home, thread_id)
+    if index_user_title:
+        title = index_user_title
+    else:
+        # Preserve a DB-only title only when it does not look like Codex's
+        # automatic first-message extraction for this same translated session.
+        existing_user_title = _peek_existing_user_title(db, thread_id, session, generated_title)
+        if existing_user_title:
+            title = existing_user_title
 
     first_msg = _first_real_user_text(session) or session.source_session_id
     if first_msg is None:
@@ -665,10 +674,45 @@ def _read_user_default_provider(codex_home: Path) -> str | None:
         return None
 
 
-def _peek_existing_user_title(db_path: Path, thread_id: str) -> str | None:
+def _read_codex_user_thread_name(codex_home: Path, thread_id: str) -> str | None:
+    """Reverse-scan session_index.jsonl for the latest user-set thread name.
+
+    Agent-bridge also writes `[from ...]` labels to this index; those are
+    generated labels, not durable user intent.
+    """
+    idx_path = codex_home / "session_index.jsonl"
+    if not idx_path.exists():
+        return None
+    latest: str | None = None
+    try:
+        with idx_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("id") != thread_id:
+                    continue
+                name = (ev.get("thread_name") or "").strip()
+                if name and not name.startswith("[from "):
+                    latest = name
+    except OSError:
+        return None
+    return latest
+
+
+def _peek_existing_user_title(
+    db_path: Path,
+    thread_id: str,
+    session: Session,
+    generated_title: str,
+) -> str | None:
     """Look up an existing title for thread_id in state_5.sqlite. Return it
-    only if it's a user-set title (not our `[from ...]` auto label and not
-    empty)."""
+    only if it's plausibly user-set rather than a generated first-message
+    title."""
     import sqlite3
     if not db_path.exists():
         return None
@@ -689,6 +733,16 @@ def _peek_existing_user_title(db_path: Path, thread_id: str) -> str | None:
         return None
     if title.startswith("[from "):
         return None
+    if title == generated_title:
+        return None
+    first_msg = (_first_real_user_text(session) or "").replace("\n", " ").replace("\r", " ").strip()
+    if first_msg:
+        if title == first_msg:
+            return None
+        if title == first_msg[:200].strip():
+            return None
+        if len(title) > 60 and first_msg.startswith(title):
+            return None
     return title
 
 

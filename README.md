@@ -2,7 +2,7 @@
 
 > Part of [**OPAL**](https://github.com/1va7/opal) (**O**pen **P**ortable **A**ctivity **L**ayer) — the cross-agent CLI session translator subsystem.
 >
-> **main after v0.6.0** — title sync across CC↔Codex twins, Codex picker recency fixes, no duplicate files on rename. See [CHANGELOG.md](CHANGELOG.md) for full version history.
+> **main after v0.6.0** — title sync across CC↔Codex twins, Codex picker/search DB title fixes, no duplicate files on rename. See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 跨 agent 的 session 翻译与 resume 桥。
 
@@ -61,6 +61,7 @@ claude --resume <UUIDv4> -p "你的新指令"          # 翻成 CC（在原 cwd 
 
 - **双向 CC ↔ Codex**：live `claude --resume` / `codex resume` 都验证通过
 - **共享标题**：在 CC 或 Codex 任一边重命名 session，对面 picker 自动跟进；CC `custom-title` / `agent-name` 会成为 Codex picker 的可读名称；不再产生重复文件
+- **Codex 搜索标题修复**：强制重渲染时会把 `session_index.jsonl` 里的用户标题写回 `state_5.sqlite`，避免 session 仍在但搜索不到
 - **自动镜像**：CC `Stop` hook + Codex `notify` hook，每段对话结束自动同步到对面；或用 `agent-resume watch` 守护进程
 - **历史修复同步**：`sync --force --include-active --days 365` 可重渲染旧镜像，修复 hook 未运行期间留下的短 context
 - **空会话降噪**：没有 replayable context 的 Codex/CC 源不会生成空镜像；已生成的空镜像会被移除
@@ -75,7 +76,7 @@ claude --resume <UUIDv4> -p "你的新指令"          # 翻成 CC（在原 cwd 
 - **覆盖保护**：反向渲染到 Claude Code 时，只允许覆盖 agent-bridge 生成的 `[from ...]` 文件，拒绝覆盖真实 CC session
 - attachment / skill_listing / nested_memory / file → developer message
 - thinking blocks 自动剥离（signature/encrypted_content 跨 harness 不兼容）
-- **30 pytest** + live `codex exec resume` + live `claude --resume` 验证
+- **31 pytest** + live `codex exec resume` + live `claude --resume` 验证
 
 ❌ 推迟（见 `specs/`）：
 - DAG 多 leaf 选择

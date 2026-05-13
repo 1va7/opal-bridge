@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from agent_bridge.adapters import claude_code
+from agent_bridge.adapters.codex import render as render_codex
 from agent_bridge.adapters.claude_code.render import encode_cwd
 from agent_bridge.canonical.schema import Session, UserText
 from agent_bridge.translator import translate
@@ -20,6 +22,41 @@ HAND_TRANSLATED = REPO_ROOT / "data" / "fixture" / "codex-output.jsonl"
 
 def _read_jsonl(p: Path) -> list[dict]:
     return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+
+
+def _create_codex_state_db(codex_home: Path) -> Path:
+    db_path = codex_home / "state_5.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                rollout_path TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                source TEXT,
+                model_provider TEXT,
+                cwd TEXT,
+                title TEXT,
+                sandbox_policy TEXT,
+                approval_mode TEXT,
+                tokens_used INTEGER,
+                has_user_event INTEGER,
+                archived INTEGER,
+                cli_version TEXT,
+                first_user_message TEXT,
+                memory_mode TEXT,
+                created_at_ms INTEGER,
+                updated_at_ms INTEGER
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return db_path
 
 
 def test_translate_fixture_structure(tmp_path: Path) -> None:
@@ -158,6 +195,60 @@ def test_cc_custom_title_becomes_codex_thread_name(tmp_path: Path) -> None:
     index_lines = _read_jsonl((tmp_path / "codex" / "session_index.jsonl"))
     assert index_lines[-1]["id"] == res.session_id
     assert index_lines[-1]["thread_name"] == "Readable Project Title"
+
+
+def test_codex_state_db_preserves_session_index_user_title(tmp_path: Path) -> None:
+    """Force re-render must not let a stale DB title hide a user-named thread."""
+    codex_home = tmp_path / "codex"
+    db_path = _create_codex_state_db(codex_home)
+    thread_id = "019e1f00-0000-7000-8000-000000000123"
+    user_title = "Offline Class Plan"
+    long_prompt = "Please help prepare the offline class with all follow-up context. " * 10
+
+    (codex_home / "session_index.jsonl").write_text(
+        json.dumps(
+            {
+                "id": thread_id,
+                "thread_name": user_title,
+                "updated_at": "2026-05-13T01:00:00.000000Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO threads (id, title) VALUES (?, ?)",
+            (thread_id, long_prompt),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    session = Session(
+        id="canonical",
+        source_harness="claude-code",
+        source_session_id="cc-offline-class",
+        cwd="/tmp/project",
+        started_at="2026-05-13T01:00:00.000Z",
+        ended_at="2026-05-13T01:05:00.000Z",
+        moments=[
+            UserText(
+                ts="2026-05-13T01:00:00.000Z",
+                text=long_prompt,
+            )
+        ],
+    )
+
+    render_codex(session, target_dir=codex_home, session_id=thread_id)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute("SELECT title FROM threads WHERE id = ?", (thread_id,)).fetchone()
+    finally:
+        conn.close()
+    assert row == (user_title,)
 
 
 def test_cc_render_refuses_to_overwrite_real_session(tmp_path: Path) -> None:

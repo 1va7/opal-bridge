@@ -15,12 +15,13 @@ Each version maps to a git tag (`v0.1.0` … `v0.6.0`).
 - Re-render missing targets even when source-side sync state says the source is unchanged.
 - Install Claude Code Stop hooks with `--include-active`, so the just-finished session is not skipped while Claude Code still lists it in the session registry.
 - Skip sources with no replayable moments and remove stale generated empty mirrors instead of leaving tiny picker entries.
+- Preserve Codex `session_index.jsonl` user titles when upserting `state_5.sqlite`, so force re-rendering cannot hide renamed sessions from Codex search/picker.
 
 ### Added
 - `agent-resume sync --force` to repair old short mirrors by bypassing source-side sync state and re-rendering deterministic targets.
 
 ### Verified
-- 30 pytest pass.
+- 31 pytest pass.
 
 ---
 

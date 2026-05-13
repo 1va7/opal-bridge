@@ -101,6 +101,8 @@ def render(
 
     sess_id = session_id or new_uuid_v4()
     out_path = proj_dir / f"{sess_id}.jsonl"
+    if out_path.exists() and not _is_agent_bridge_generated(out_path):
+        raise FileExistsError(f"Refusing to overwrite non-agent-bridge Claude Code session: {out_path}")
 
     warnings: list[str] = []
     if session.subagent_transcripts and subagent_strategy != "inline":
@@ -360,6 +362,24 @@ def _render_moment(
         return []
 
     return []
+
+
+def _is_agent_bridge_generated(path: Path) -> bool:
+    try:
+        with path.open(encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                ev = json.loads(line)
+                return (
+                    ev.get("type") == "custom-title"
+                    and isinstance(ev.get("customTitle"), str)
+                    and ev["customTitle"].startswith("[from ")
+                )
+    except (OSError, json.JSONDecodeError):
+        return False
+    return False
 
 
 def _canonical_to_cc_tool(call: ToolCall) -> tuple[str, dict[str, Any]]:

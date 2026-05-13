@@ -499,11 +499,15 @@ def _first_real_user_text(session: Session) -> str | None:
 
 def _make_thread_name(session: Session) -> str:
     """Build a recognizable label for the resume picker's Conversation column."""
-    body = _first_real_user_text(session) or session.source_session_id
+    source_title = None
+    if session.source_harness == "claude-code":
+        cc_meta = session.source_metadata.get("claude_code", {})
+        source_title = cc_meta.get("custom_title") or cc_meta.get("agent_name")
+    body = source_title or _first_real_user_text(session) or session.source_session_id
     body = body.replace("\n", " ").replace("\r", " ").strip()
     if len(body) > 60:
         body = body[:57] + "..."
-    return f"[from {session.source_harness}] {body}"
+    return body if source_title else f"[from {session.source_harness}] {body}"
 
 
 def _append_thread_name(codex_home: Path, thread_id: str, thread_name: str) -> None:
@@ -589,12 +593,16 @@ def _upsert_state_db(
         first_msg = first_msg[:200]
 
     started_at = session.started_at or datetime.now(timezone.utc).isoformat()
+    updated_at = session.ended_at or started_at
     try:
         from agent_bridge.canonical.ids import parse_cc_iso
-        ts = int(parse_cc_iso(started_at).timestamp())
+        created_ts = int(parse_cc_iso(started_at).timestamp())
+        updated_ts = int(parse_cc_iso(updated_at).timestamp())
     except Exception:
-        ts = int(datetime.now(timezone.utc).timestamp())
-    ts_ms = ts * 1000
+        created_ts = int(datetime.now(timezone.utc).timestamp())
+        updated_ts = created_ts
+    created_ts_ms = created_ts * 1000
+    updated_ts_ms = updated_ts * 1000
 
     # Use the user's configured provider so the picker's provider filter accepts us
     provider = model_provider or _read_user_default_provider(codex_home) or "openai"
@@ -619,8 +627,8 @@ def _upsert_state_db(
                 (
                     thread_id,
                     str(rollout_path),
-                    ts,
-                    ts,
+                    created_ts,
+                    updated_ts,
                     "cli",
                     provider,
                     session.cwd,
@@ -633,8 +641,8 @@ def _upsert_state_db(
                     "0.1.0",
                     first_msg,
                     "enabled",
-                    ts_ms,
-                    ts_ms,
+                    created_ts_ms,
+                    updated_ts_ms,
                 ),
             )
             conn.commit()

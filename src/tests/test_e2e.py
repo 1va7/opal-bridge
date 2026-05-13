@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from agent_bridge.adapters import claude_code
+from agent_bridge.adapters.claude_code.render import encode_cwd
+from agent_bridge.canonical.schema import Session, UserText
 from agent_bridge.translator import translate
 
 
@@ -122,3 +125,72 @@ def test_unsupported_direction_raises(tmp_path: Path) -> None:
             target_harness="codex",
             target_dir=tmp_path,
         )
+
+
+def test_cc_custom_title_becomes_codex_thread_name(tmp_path: Path) -> None:
+    """CC user-visible titles should carry into Codex picker metadata."""
+    cc_path = tmp_path / "cc.jsonl"
+    rows = [
+        {
+            "type": "user",
+            "sessionId": "cc-title-1",
+            "uuid": "u1",
+            "parentUuid": None,
+            "cwd": "/tmp/project",
+            "timestamp": "2026-05-13T01:00:00.000Z",
+            "message": {"role": "user", "content": "first prompt"},
+        },
+        {
+            "type": "custom-title",
+            "customTitle": "Readable Project Title",
+            "sessionId": "cc-title-1",
+        },
+    ]
+    cc_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+    res = translate(
+        source_path=cc_path,
+        source_harness="claude-code",
+        target_harness="codex",
+        target_dir=tmp_path / "codex",
+    )
+
+    index_lines = _read_jsonl((tmp_path / "codex" / "session_index.jsonl"))
+    assert index_lines[-1]["id"] == res.session_id
+    assert index_lines[-1]["thread_name"] == "Readable Project Title"
+
+
+def test_cc_render_refuses_to_overwrite_real_session(tmp_path: Path) -> None:
+    """Idempotent rendering may overwrite bridge files, but not real CC sessions."""
+    target_root = tmp_path / "claude"
+    real_session = target_root / encode_cwd("/tmp/project") / "existing.jsonl"
+    real_session.parent.mkdir(parents=True)
+    real_session.write_text(
+        json.dumps(
+            {
+                "type": "user",
+                "sessionId": "existing",
+                "uuid": "u1",
+                "cwd": "/tmp/project",
+                "timestamp": "2026-05-13T01:00:00.000Z",
+                "message": {"role": "user", "content": "real session"},
+            }
+        )
+        + "\n"
+    )
+    session = Session(
+        id="canonical",
+        source_harness="codex",
+        source_session_id="codex-id",
+        cwd="/tmp/project",
+        started_at="2026-05-13T01:00:00.000Z",
+        moments=[
+            UserText(
+                ts="2026-05-13T01:00:00.000Z",
+                text="translated",
+            )
+        ],
+    )
+
+    with pytest.raises(FileExistsError):
+        claude_code.render(session, target_dir=target_root, session_id="existing")

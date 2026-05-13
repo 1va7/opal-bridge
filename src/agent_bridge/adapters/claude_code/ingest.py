@@ -104,6 +104,8 @@ def ingest(jsonl_path: Path | str, **opts: Any) -> Session:
                 "version": header_info.get("version"),
                 "userType": header_info.get("user_type"),
                 "entrypoint": header_info.get("entrypoint"),
+                "custom_title": header_info.get("custom_title"),
+                "agent_name": header_info.get("agent_name"),
                 "subagent_meta": subagent_meta,
             }
         },
@@ -199,6 +201,10 @@ def _extract_header(lines: list[dict[str, Any]]) -> dict[str, Any]:
             header["user_type"] = line["userType"]
         if "entrypoint" in line and "entrypoint" not in header:
             header["entrypoint"] = line["entrypoint"]
+        if line.get("type") == "custom-title" and line.get("customTitle"):
+            header["custom_title"] = line["customTitle"]
+        if line.get("type") == "agent-name" and line.get("agentName"):
+            header["agent_name"] = line["agentName"]
         msg = line.get("message")
         if isinstance(msg, dict) and "model" in msg and "model" not in header:
             header["model"] = msg["model"]

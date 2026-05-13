@@ -80,7 +80,9 @@ def test_install_hook_cc_appends_stop_hook(tmp_path, monkeypatch) -> None:
     cmds = data["hooks"]["Stop"][0]["hooks"]
     # original + new = 2
     assert len(cmds) == 2
-    assert any("agent_bridge.cli sync" in c["command"] for c in cmds)
+    sync_cmds = [c["command"] for c in cmds if "agent_bridge.cli sync" in c["command"]]
+    assert len(sync_cmds) == 1
+    assert "--include-active" in sync_cmds[0]
 
 
 def test_install_hook_cc_idempotent(tmp_path, monkeypatch) -> None:
@@ -97,3 +99,23 @@ def test_install_hook_cc_idempotent(tmp_path, monkeypatch) -> None:
     data = json.loads(settings.read_text())
     cmds = data["hooks"]["Stop"][0]["hooks"]
     assert sum("agent_bridge.cli sync" in c["command"] for c in cmds) == 1
+    assert "--include-active" in next(c["command"] for c in cmds if "agent_bridge.cli sync" in c["command"])
+
+
+def test_install_hook_cc_upgrades_existing_sync_command(tmp_path, monkeypatch) -> None:
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    settings = fake_home / ".claude" / "settings.json"
+    settings.write_text(json.dumps({"hooks": {"Stop": [{"matcher": "*", "hooks": [
+        {"type": "command", "command": "/old/python -m agent_bridge.cli sync --direction cc-to-codex --days 1 >/dev/null 2>&1"}
+    ]}]}}))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+    result = runner.invoke(app, ["install-hook", "--target", "claude-code"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(settings.read_text())
+    cmds = data["hooks"]["Stop"][0]["hooks"]
+    assert len(cmds) == 1
+    assert "agent_bridge.cli sync" in cmds[0]["command"]
+    assert "--include-active" in cmds[0]["command"]
+    assert "/old/python" not in cmds[0]["command"]

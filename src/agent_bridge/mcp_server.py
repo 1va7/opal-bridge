@@ -109,17 +109,27 @@ def build_app() -> FastMCP:
         direction: str = "both",
         days: int = 7,
         max_bytes: int = 25 * 1024 * 1024,
+        include_active: bool = False,
+        force: bool = False,
     ) -> dict:
         """Mirror recent sessions in both directions (or one).
 
         direction: 'cc-to-codex' | 'codex-to-cc' | 'both'
         """
-        stats = sync_once(direction=direction, days=days, max_bytes=max_bytes, log=lambda *_: None)
+        stats = sync_once(
+            direction=direction,
+            days=days,
+            max_bytes=max_bytes,
+            include_active=include_active,
+            force=force,
+            log=lambda *_: None,
+        )
         return {
             "translated": stats.translated,
             "skipped_existing": stats.skipped_existing,
             "skipped_active": stats.skipped_active,
             "skipped_too_big": stats.skipped_too_big,
+            "skipped_empty": stats.skipped_empty,
             "failed": stats.failed,
             "failures": [{"source": s, "error": e} for s, e in stats.failures[:10]],
         }

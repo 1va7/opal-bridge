@@ -12,9 +12,15 @@ Each version maps to a git tag (`v0.1.0` … `v0.6.0`).
 - Preserve Claude Code `custom-title` / `agent-name` metadata when rendering into Codex so sessions appear with the user's readable title instead of the first prompt.
 - Use session `ended_at` for Codex `state_5.sqlite.updated_at`, so recently synced long-running sessions appear in the recent picker instead of being buried by their start time.
 - Refuse to overwrite real Claude Code jsonl sessions during reverse rendering; only agent-bridge-generated `[from ...]` files are eligible for idempotent overwrite.
+- Re-render missing targets even when source-side sync state says the source is unchanged.
+- Install Claude Code Stop hooks with `--include-active`, so the just-finished session is not skipped while Claude Code still lists it in the session registry.
+- Skip sources with no replayable moments and remove stale generated empty mirrors instead of leaving tiny picker entries.
+
+### Added
+- `agent-resume sync --force` to repair old short mirrors by bypassing source-side sync state and re-rendering deterministic targets.
 
 ### Verified
-- 26 pytest pass.
+- 30 pytest pass.
 
 ---
 

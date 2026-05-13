@@ -170,6 +170,7 @@ def sync_cmd(
     days: int = typer.Option(365, "--days", "-d", help="Only sessions modified within N days (default 365 = ~all)"),
     max_bytes: int = typer.Option(100 * 1024 * 1024, "--max-bytes", help="Skip files larger than this (default 100MB)"),
     include_active: bool = typer.Option(False, "--include-active", help="Include CC sessions currently in use (status=busy)"),
+    force: bool = typer.Option(False, "--force", help="Retranslate even if source sync state says it is unchanged"),
 ) -> None:
     """One-shot batch translate recent sessions in both/given direction(s).
 
@@ -182,6 +183,7 @@ def sync_cmd(
         days=days,
         max_bytes=max_bytes,
         include_active=include_active,
+        force=force,
         log=typer.echo,
     )
     typer.echo("")
@@ -190,6 +192,7 @@ def sync_cmd(
         f"{stats.skipped_existing} unchanged, "
         f"{stats.skipped_active} active (skipped), "
         f"{stats.skipped_too_big} too-big (skipped), "
+        f"{stats.skipped_empty} empty (skipped), "
         f"{stats.failed} failed"
     )
     if stats.failures:
@@ -204,9 +207,19 @@ def watch_cmd(
     direction: str = typer.Option("both", "--direction"),
     days: int = typer.Option(7, "--days", "-d"),
     max_bytes: int = typer.Option(25 * 1024 * 1024, "--max-bytes"),
+    include_active: bool = typer.Option(False, "--include-active", help="Include CC sessions currently in use"),
+    force: bool = typer.Option(False, "--force", help="Retranslate every tick even if sync state says unchanged"),
 ) -> None:
     """Daemon mode: keep both sides mirrored. Ctrl-C to stop."""
-    watch_loop(interval=interval, direction=direction, days=days, max_bytes=max_bytes, log=typer.echo)
+    watch_loop(
+        interval=interval,
+        direction=direction,
+        days=days,
+        max_bytes=max_bytes,
+        include_active=include_active,
+        force=force,
+        log=typer.echo,
+    )
 
 
 @app.command("install-hook")
@@ -224,7 +237,10 @@ def install_hook_cmd(
         direction = "cc-to-codex" if target == "claude-code" else "codex-to-cc"
 
     py = Path(sys.executable).resolve()
-    cmd_str = f"{py} -m agent_bridge.cli sync --direction {direction} --days 1 >/dev/null 2>&1"
+    cmd_str = f"{py} -m agent_bridge.cli sync --direction {direction} --days 1"
+    if target == "claude-code" and direction in ("cc-to-codex", "both"):
+        cmd_str += " --include-active"
+    cmd_str += " >/dev/null 2>&1"
 
     if target == "claude-code":
         _install_cc_hook(cmd_str, dry_run)
@@ -257,6 +273,21 @@ def _install_cc_hook(cmd_str: str, dry_run: bool) -> None:
         target_group = {"matcher": "*", "hooks": []}
         stop_hooks.append(target_group)
     cmds = target_group.setdefault("hooks", [])
+    for h in cmds:
+        existing_cmd = h.get("command")
+        if isinstance(existing_cmd, str) and "agent_bridge.cli sync" in existing_cmd:
+            if existing_cmd == cmd_str:
+                typer.echo("CC Stop hook already installed; nothing to do.")
+                return
+            h["command"] = cmd_str
+            if dry_run:
+                typer.echo("would update existing agent-bridge Stop hook in ~/.claude/settings.json:")
+                typer.echo(json.dumps(settings, indent=2, ensure_ascii=False))
+                return
+            settings_path.write_text(json.dumps(settings, indent=2, ensure_ascii=False))
+            typer.echo(f"✓ updated Stop hook in {settings_path}")
+            typer.echo("Hook fires on every CC turn end; runs sync silently.")
+            return
     if any(h.get("command") == cmd_str for h in cmds):
         typer.echo("CC Stop hook already installed; nothing to do.")
         return

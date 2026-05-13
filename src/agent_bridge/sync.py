@@ -34,6 +34,7 @@ class SyncStats:
     skipped_existing: int = 0
     skipped_active: int = 0
     skipped_too_big: int = 0
+    skipped_empty: int = 0
     failed: int = 0
     failures: list[tuple[str, str]] = None  # list of (source_path, error)
 
@@ -48,6 +49,7 @@ def sync_once(
     days: int = 365,
     max_bytes: int = 100 * 1024 * 1024,
     include_active: bool = False,
+    force: bool = False,
     log: callable = print,
 ) -> SyncStats:
     """Translate recent sessions on the requested direction(s)."""
@@ -64,11 +66,11 @@ def sync_once(
 
     if direction in ("cc-to-codex", "both"):
         for path in _list_cc_sessions(cutoff):
-            _try_translate_one(path, "claude-code", "codex", max_bytes, stats, log, include_active)
+            _try_translate_one(path, "claude-code", "codex", max_bytes, stats, log, include_active, force)
 
     if direction in ("codex-to-cc", "both"):
         for path in _list_codex_sessions(cutoff):
-            _try_translate_one(path, "codex", "claude-code", max_bytes, stats, log, include_active)
+            _try_translate_one(path, "codex", "claude-code", max_bytes, stats, log, include_active, force)
 
     return stats
 
@@ -80,6 +82,7 @@ def watch_loop(
     days: int = 365,
     max_bytes: int = 100 * 1024 * 1024,
     include_active: bool = False,
+    force: bool = False,
     log: callable = print,
 ) -> None:
     """Poll every `interval` seconds; never returns. Ctrl-C to stop."""
@@ -91,6 +94,7 @@ def watch_loop(
                 days=days,
                 max_bytes=max_bytes,
                 include_active=include_active,
+                force=force,
                 log=lambda *_: None,
             )
             if stats.translated > 0 or stats.failed > 0:
@@ -114,6 +118,7 @@ def _try_translate_one(
     stats: SyncStats,
     log: callable,
     include_active: bool = False,
+    force: bool = False,
 ) -> None:
     try:
         size = source_path.stat().st_size
@@ -131,18 +136,24 @@ def _try_translate_one(
         return
 
     direction_key = f"{src_harness}-to-{tgt_harness}"
+    target_path, target_id = _expected_target(source_path, src_harness, tgt_harness)
+
     from agent_bridge import sync_state
     fingerprint = _fingerprint_for(source_path, src_harness)
-    if sync_state.is_unchanged(source_path, direction_key, fingerprint):
+    if not force and target_path.exists() and sync_state.is_unchanged(source_path, direction_key, fingerprint):
         stats.skipped_existing += 1
         return
-
-    target_path, target_id = _expected_target(source_path, src_harness, tgt_harness)
 
     try:
         ingest_fn = _ingest_for(src_harness)
         render_fn = _render_for(tgt_harness)
         canonical = ingest_fn(source_path)
+        if not canonical.moments:
+            stats.skipped_empty += 1
+            removed = _remove_empty_generated_target(target_path, tgt_harness)
+            suffix = " and removed empty generated target" if removed else ""
+            log(f"  - skipped empty {src_harness} source: {source_path.name}{suffix}")
+            return
         title_prefix = f"[from {src_harness}] " if tgt_harness == "claude-code" else None
         render_fn(
             canonical,
@@ -157,6 +168,29 @@ def _try_translate_one(
         stats.failed += 1
         stats.failures.append((str(source_path), str(e)))
         log(f"  ✗ {source_path.name}: {e}")
+
+
+def _remove_empty_generated_target(target_path: Path, target_harness: str) -> bool:
+    """Delete stale generated mirrors for sources with no replayable context."""
+    try:
+        exists = target_path.exists()
+    except OSError:
+        return False
+    if not exists:
+        return False
+    if target_harness == "claude-code":
+        generated = _is_agent_bridge_cc(target_path)
+    elif target_harness == "codex":
+        generated = _is_agent_bridge_codex(target_path)
+    else:
+        generated = False
+    if not generated:
+        return False
+    try:
+        target_path.unlink()
+        return True
+    except OSError:
+        return False
 
 
 def _fingerprint_for(path: Path, harness: str) -> str:

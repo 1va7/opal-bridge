@@ -11,6 +11,11 @@ respective session jsonl formats through a canonical intermediate representation
 - **Empirical over speculative.** When documenting harness behavior, prefer
   evidence from real session files on disk and from upstream source code. Mark
   any unverified claim explicitly.
+- **Docs move with shipped behavior.** Before any GitHub-facing operation
+  (commit, push, release, or PR), check whether README.md and CHANGELOG.md need
+  updates for the code change. If behavior, setup, user-visible output, or
+  verification counts changed, update the relevant docs in the same commit; if
+  no doc update is needed, state that explicitly before pushing.
 - **Both directions, always.** Every mapping decision must be reversible.
   Document the lossy cases instead of silently dropping data.
 - **Canonical first.** Do not wire CC ↔ Codex as a direct converter. All

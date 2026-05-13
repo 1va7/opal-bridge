@@ -2,7 +2,7 @@
 
 > Part of [**OPAL**](https://github.com/1va7/opal) (**O**pen **P**ortable **A**ctivity **L**ayer) — the cross-agent CLI session translator subsystem.
 >
-> **v0.6.0** — title sync across CC↔Codex twins, no duplicate files on rename. See [CHANGELOG.md](CHANGELOG.md) for full version history.
+> **main after v0.6.0** — title sync across CC↔Codex twins, Codex picker recency fixes, no duplicate files on rename. See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 跨 agent 的 session 翻译与 resume 桥。
 
@@ -51,12 +51,12 @@ codex exec resume <UUIDv7> "你的新指令"          # 翻成 Codex
 claude --resume <UUIDv4> -p "你的新指令"          # 翻成 CC（在原 cwd 下）
 ```
 
-## 当前能力（v0.6.0）
+## 当前能力（main after v0.6.0）
 
 ✅ **双向翻译 + 自动镜像 + 共享标题** — 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)
 
 - **双向 CC ↔ Codex**：live `claude --resume` / `codex resume` 都验证通过
-- **共享标题**：在 CC 或 Codex 任一边重命名 session，对面 picker 自动跟进；不再产生重复文件
+- **共享标题**：在 CC 或 Codex 任一边重命名 session，对面 picker 自动跟进；CC `custom-title` / `agent-name` 会成为 Codex picker 的可读名称；不再产生重复文件
 - **自动镜像**：CC `Stop` hook + Codex `notify` hook，每段对话结束自动同步到对面；或用 `agent-resume watch` 守护进程
 - **MCP server**：`agent-resume mcp serve` 暴露 6 个工具给任意 MCP host（Claude Desktop / Cursor / Cline / …）
 - **6 核心工具映射**：Bash / Read / Glob / Grep / WebSearch / 大部分 metadata
@@ -65,10 +65,11 @@ claude --resume <UUIDv4> -p "你的新指令"          # 翻成 CC（在原 cwd 
 - **compact_boundary 双向**：CC `compact_boundary + isCompactSummary user` ↔ canonical SummaryCompaction ↔ Codex `compacted / context_compaction`
 - **shell 命令模式识别**：Codex 端的 `cat -n / sed / head / tail / rg --files` 反向回 canonical Read/Glob，避免 round-trip 退化
 - **realpath + NFC**：CC encoded-cwd 与 `claude --resume` 行为一致
-- **正确的 picker 显示**：title / mtime / 助手回复都对齐原始 session 活动时间
+- **正确的 picker 显示**：title / mtime / state DB `updated_at` / 助手回复都对齐原始 session 活动时间
+- **覆盖保护**：反向渲染到 Claude Code 时，只允许覆盖 agent-bridge 生成的 `[from ...]` 文件，拒绝覆盖真实 CC session
 - attachment / skill_listing / nested_memory / file → developer message
 - thinking blocks 自动剥离（signature/encrypted_content 跨 harness 不兼容）
-- **24 pytest** + live `codex exec resume` + live `claude --resume` 验证
+- **26 pytest** + live `codex exec resume` + live `claude --resume` 验证
 
 ❌ 推迟（见 `specs/`）：
 - DAG 多 leaf 选择

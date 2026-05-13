@@ -6,6 +6,18 @@ Each version maps to a git tag (`v0.1.0` … `v0.6.0`).
 
 ---
 
+## Unreleased
+
+### Fixed
+- Preserve Claude Code `custom-title` / `agent-name` metadata when rendering into Codex so sessions appear with the user's readable title instead of the first prompt.
+- Use session `ended_at` for Codex `state_5.sqlite.updated_at`, so recently synced long-running sessions appear in the recent picker instead of being buried by their start time.
+- Refuse to overwrite real Claude Code jsonl sessions during reverse rendering; only agent-bridge-generated `[from ...]` files are eligible for idempotent overwrite.
+
+### Verified
+- 26 pytest pass.
+
+---
+
 ## v0.6.0 — Title sync, no duplicates (2026-05-07)
 
 **Headline**: rename a session in either CC or Codex; the new title propagates to its twin without spawning a duplicate file.
